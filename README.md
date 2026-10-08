@@ -85,7 +85,7 @@ newsletters, 5 prompt-injection emails, and invalid container numbers (ISO 6346 
 | Fresh `git clone` + `scripts/init_env.sh` + `docker compose up` + `scripts/import_workflows.sh` | Demo reproduced; with the production overlay, HTTPS via Caddy, `/internal` and private webhooks blocked at the edge |
 | `scripts/backup.sh` → wipe → `scripts/restore.sh` | Both databases and n8n credentials restored |
 
-Plus 150+ unit and API tests (LLM mocked), run in CI.
+Plus 150+ unit and API tests (LLM mocked), set up to run in GitHub Actions (`.github/workflows/tests.yml`).
 
 ## Screenshots
 
