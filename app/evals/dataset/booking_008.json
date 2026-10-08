@@ -1,0 +1,22 @@
+{
+  "id": "booking_008",
+  "from": "Hamid Raza <hamid@raza-steel.example>",
+  "subject": "Confirm booking for steel coils",
+  "body": "Dear team, kindly confirm booking for 20 steel coils Karachi to Gujranwala as per your quote Q-1210. We will share the pickup date shortly.\nHamid",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1210"
+    },
+    "must_be_null": [
+      "pickup_date"
+    ]
+  },
+  "tags": [
+    "missing_fields"
+  ]
+}

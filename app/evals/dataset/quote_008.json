@@ -1,0 +1,30 @@
+{
+  "id": "quote_008",
+  "from": "Procurement <procurement@nova-solar.example>",
+  "subject": "RFQ: solar panels Multan",
+  "body": "Hello,\n\nRequest for quotation: 180 cartons of solar panels from Lahore to Multan. Total weight 5.4 tons. Please also tell us what documents you need.\n\nNova Solar Procurement",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Lahore",
+      "destination_city": "Multan",
+      "pieces": 180,
+      "package_type": "carton",
+      "weight_kg": 5400,
+      "commodity": "solar panels"
+    },
+    "must_be_null": [
+      "pickup_date",
+      "hazardous"
+    ]
+  },
+  "tags": [
+    "missing_fields",
+    "unit_conversion"
+  ],
+  "label_note": "5.4 tons = 5400 kg. No pickup date → asked for in the reply."
+}

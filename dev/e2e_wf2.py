@@ -14,6 +14,7 @@ N8N_WEBHOOK_SECRET from .env.
 
 import argparse
 import json
+import os
 import subprocess
 import time
 import urllib.error
@@ -26,8 +27,10 @@ ENV = dict(
     for line in (ROOT / ".env").read_text().splitlines()
     if "=" in line and not line.lstrip().startswith("#")
 )
-APP, N8N = "http://localhost:8001", "http://localhost:5678"
-COMPOSE = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml"), "-f", str(ROOT / "docker-compose.mocks.yml")]
+APP = os.environ.get("E2E_APP_URL", "http://localhost:8001")
+N8N = os.environ.get("E2E_N8N_URL", "http://localhost:5678")
+COMPOSE = ["docker", "compose", "--project-directory", str(ROOT), "-f", str(ROOT / "docker-compose.yml"),
+           "-f", str(ROOT / "docker-compose.mocks.yml")]
 BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 
 

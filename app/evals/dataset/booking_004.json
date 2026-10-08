@@ -1,0 +1,21 @@
+{
+  "id": "booking_004",
+  "from": "Rizwan Ahmed <rizwan@ahmed-agro.example>",
+  "subject": "Go ahead - Q-1188",
+  "body": "Hi,\n\nPlease go ahead with quote Q-1188. Pickup tomorrow at 10am from our Okara mill, delivery to Karachi port, berth 7.\n\nRizwan",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1188",
+      "pickup_date": "2026-10-09"
+    }
+  },
+  "tags": [
+    "relative_date"
+  ],
+  "label_note": "Pickup tomorrow → high urgency."
+}

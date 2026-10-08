@@ -1,0 +1,23 @@
+{
+  "id": "status_005",
+  "from": "Nadia <nadia@zenith-eng.example>",
+  "subject": "ETA for two containers",
+  "body": "Hello,\nCould you share the ETA for containers CSQU3054383 and MSCU1234566? Customs broker needs it today.\nThanks",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "shipment_status",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "container_numbers": [
+        "CSQU3054383",
+        "MSCU1234566"
+      ]
+    }
+  },
+  "tags": [
+    "multiple_refs"
+  ],
+  "label_note": "Needed today → high urgency."
+}

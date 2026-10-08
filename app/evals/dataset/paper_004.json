@@ -1,0 +1,42 @@
+{
+  "id": "paper_004",
+  "from": "Billing <billing@northline-transport.example>",
+  "subject": "October invoices",
+  "body": "Dear Indus Freight,\n\nAttached are invoices INV-3301, INV-3302 and INV-3303 for October trips.\n\nRegards,\nNorthline Billing",
+  "attachments": [
+    {
+      "filename": "INV-3301.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-INV-3301.pdf"
+    },
+    {
+      "filename": "INV-3302.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-INV-3302.pdf"
+    },
+    {
+      "filename": "INV-3303.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-INV-3303.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "INV-3301",
+        "INV-3302",
+        "INV-3303"
+      ]
+    }
+  },
+  "tags": [
+    "multiple_refs"
+  ]
+}

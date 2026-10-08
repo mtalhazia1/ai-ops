@@ -74,6 +74,15 @@ TIME_ZONE = os.environ.get("GENERIC_TIMEZONE", "Asia/Karachi")
 USE_I18N = True
 USE_TZ = True
 
+# Behind Caddy in production (docker-compose.prod.yml): trust its X-Forwarded-Proto and
+# keep cookies HTTPS-only.
+if env_bool("DJANGO_SECURE", False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 LOGIN_URL = "/admin/login/"

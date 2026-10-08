@@ -1,0 +1,16 @@
+{
+  "id": "other_004",
+  "from": "Hamza Iqbal <hamza@sundar-foods.example>",
+  "subject": "Thank you!",
+  "body": "Thanks for the smooth delivery last week, great job by your driver.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "thanks"
+  ]
+}

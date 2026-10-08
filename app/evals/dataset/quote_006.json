@@ -1,0 +1,30 @@
+{
+  "id": "quote_006",
+  "from": "Hina Farooq <hina@ff-pharma.example>",
+  "subject": "Temperature controlled transport",
+  "body": "Dear Indus Freight,\n\nWe need a reefer truck from Karachi to Lahore for 12 pallets of vaccines (approx 3,000 kg), 2-8°C required. Pickup on 15 October. Not hazardous.\n\nKind regards,\nHina Farooq\nLogistics, FF Pharma",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Karachi",
+      "destination_city": "Lahore",
+      "pieces": 12,
+      "package_type": "pallet",
+      "weight_kg": 3000,
+      "pickup_date": "2026-10-15",
+      "hazardous": false,
+      "commodity": "vaccines"
+    },
+    "must_be_null": [
+      "contact_phone"
+    ]
+  },
+  "tags": [
+    "clean",
+    "special_requirements"
+  ]
+}

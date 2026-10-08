@@ -1,0 +1,51 @@
+# Production overlay: HTTPS through Caddy, nothing else published.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Needs APP_DOMAIN, N8N_DOMAIN and ACME_EMAIL in .env, and DNS A records for both
+# domains pointing at the server. See docs/deploy.md.
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env}
+      N8N_DOMAIN: ${N8N_DOMAIN:?set N8N_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app: {condition: service_healthy}
+      n8n: {condition: service_healthy}
+
+  app:
+    ports: !reset []
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_SECURE: "true"
+      DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},app,localhost,127.0.0.1
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://${APP_DOMAIN}
+      DASHBOARD_BASE_URL: https://${APP_DOMAIN}
+
+  n8n:
+    ports: !reset []
+    environment: &n8n-prod
+      N8N_HOST: ${N8N_DOMAIN}
+      N8N_PROTOCOL: https
+      N8N_WEBHOOK_URL: https://${N8N_DOMAIN}/
+      N8N_EDITOR_BASE_URL: https://${N8N_DOMAIN}/
+      N8N_PROXY_HOPS: "1"
+      N8N_SECURE_COOKIE: "true"
+      DASHBOARD_BASE_URL: https://${APP_DOMAIN}
+
+  n8n-worker:
+    environment: *n8n-prod
+
+volumes:
+  caddy_data:
+  caddy_config:

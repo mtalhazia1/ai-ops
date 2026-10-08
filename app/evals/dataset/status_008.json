@@ -1,0 +1,19 @@
+{
+  "id": "status_008",
+  "from": "Farah <farah@bluewave-imports.example>",
+  "subject": "RE: Delivery update",
+  "body": "Thanks for the update. Is booking BK-4471 still on track for Friday?\n\nOn Wed, Oct 7, 2026 at 5:00 PM Indus Freight Ops <ops@indusfreight.example> wrote:\n> Your shipment under booking BK-4471 left Lahore this morning.\n> Regards",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "shipment_status",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "booking_reference": "BK-4471"
+    }
+  },
+  "tags": [
+    "reply_chain"
+  ]
+}

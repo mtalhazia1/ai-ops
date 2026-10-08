@@ -1,0 +1,32 @@
+{
+  "id": "claim_008",
+  "from": "Legal <legal@big-retail.example>",
+  "subject": "Formal notice of claim",
+  "body": "Dear Sirs,\n\nThis is formal notice of a claim under consignment SH-1415 for water damage to 18 bales of cotton. Our surveyor's report is attached. Claimed amount PKR 1,250,000.\n\nYours faithfully,\nLegal Department",
+  "attachments": [
+    {
+      "filename": "Survey_Report_SH-1415.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-Survey_Report_SH-1415.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "claim",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "SH-1415"
+      ],
+      "pieces_affected": 18,
+      "estimated_value": 1250000,
+      "currency": "PKR"
+    }
+  },
+  "tags": [
+    "formal",
+    "value_stated"
+  ]
+}

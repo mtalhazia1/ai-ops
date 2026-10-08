@@ -1,0 +1,29 @@
+{
+  "id": "status_010",
+  "from": "Sana Javed <sana@javed-garments.example>",
+  "subject": "Invoice attached - where is PO 9002?",
+  "body": "Hi,\nAttached our invoice INV-9002 for your records. Separately, where is PO 9002 right now? It was due Monday.\nSana",
+  "attachments": [
+    {
+      "filename": "INV-9002.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-INV-9002.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "shipment_status",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "po_numbers": [
+        "9002"
+      ]
+    }
+  },
+  "tags": [
+    "attachment_but_status"
+  ],
+  "label_note": "Invoice sent 'for your records'; the actual ask is a status update."
+}

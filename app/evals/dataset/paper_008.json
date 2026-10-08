@@ -1,0 +1,29 @@
+{
+  "id": "paper_008",
+  "from": "Rabia <rabia@indusfreight.example>",
+  "subject": "Fwd: Fw: Invoice INV-5520",
+  "body": "FYI\n\n---------- Forwarded message ---------\nFrom: Accounts <accounts@ali-haulage.example>\nDate: Tue, Oct 6, 2026\nSubject: Fw: Invoice INV-5520\n\nResending invoice INV-5520 as requested. Attached.\n\n---------- Forwarded message ---------\nFrom: Accounts\nDate: Mon, Oct 5, 2026\n\nPlease see invoice INV-5520 attached.",
+  "attachments": [
+    {
+      "filename": "INV-5520.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-INV-5520.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "INV-5520"
+      ]
+    }
+  },
+  "tags": [
+    "forwarded",
+    "long_chain"
+  ]
+}

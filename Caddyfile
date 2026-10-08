@@ -1,0 +1,34 @@
+# Two sites: the Django dashboard and the n8n editor/webhooks. Caddy gets and renews
+# Let's Encrypt certificates for both automatically.
+{
+	email {$ACME_EMAIL}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		-Server
+	}
+}
+
+{$APP_DOMAIN} {
+	import security_headers
+	encode zstd gzip
+	# The internal API is for n8n on the Docker network only (Section 12).
+	@internal path /internal /internal/*
+	respond @internal 404
+	reverse_proxy app:8001
+}
+
+{$N8N_DOMAIN} {
+	import security_headers
+	encode zstd gzip
+	# Django calls these on the Docker network; they are never needed from outside.
+	@private path /webhook/process* /webhook/execute*
+	respond @private 404
+	# Everything else: the editor (behind n8n's own login) and the signed
+	# /webhook-waiting/ approval links that Slack buttons open.
+	reverse_proxy n8n:5678
+}

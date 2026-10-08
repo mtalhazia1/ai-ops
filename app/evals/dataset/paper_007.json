@@ -1,0 +1,34 @@
+{
+  "id": "paper_007",
+  "from": "Asma <asma@asma-exports.example>",
+  "subject": "documents for customs",
+  "body": "Assalam o alaikum, customs ke liye commercial invoice aur packing list attach kar di hai. Ref SH-1440.",
+  "attachments": [
+    {
+      "filename": "Commercial_Invoice.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-Commercial_Invoice.pdf"
+    },
+    {
+      "filename": "Packing_List.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-Packing_List.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "SH-1440"
+      ]
+    }
+  },
+  "tags": [
+    "roman_urdu"
+  ]
+}

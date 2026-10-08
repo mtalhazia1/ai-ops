@@ -1,0 +1,28 @@
+{
+  "id": "paper_005",
+  "from": "Docs <docs@sea-lines.example>",
+  "subject": "B/L for vessel MV Karachi Star",
+  "body": "Please find the bill of lading MBL-KHI-55021 attached for your shipment on MV Karachi Star.",
+  "attachments": [
+    {
+      "filename": "MBL-KHI-55021.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-MBL-KHI-55021.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "MBL-KHI-55021"
+      ]
+    }
+  },
+  "tags": [
+    "clean"
+  ]
+}

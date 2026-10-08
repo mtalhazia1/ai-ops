@@ -1,0 +1,16 @@
+{
+  "id": "other_006",
+  "from": "Ahmed <ahmed@ahmed-trading.example>",
+  "subject": "Automatic reply: Booking",
+  "body": "Thank you for your email. I am travelling until 14 October and will reply on my return. Out of office.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "out_of_office"
+  ]
+}

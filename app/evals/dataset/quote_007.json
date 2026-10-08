@@ -1,0 +1,30 @@
+{
+  "id": "quote_007",
+  "from": "Asif <asif.k@mail.example>",
+  "subject": "Rate?",
+  "body": "Assalam o alaikum. Sialkot se Karachi port 2 x 40ft container chahiye, sports goods. Saturday ko loading hai. Rate send kr dein",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Sialkot",
+      "destination_city": "Karachi",
+      "pieces": 2,
+      "pickup_date": "2026-10-10",
+      "commodity": "sports goods",
+      "mode": "FCL"
+    },
+    "must_be_null": [
+      "weight_kg",
+      "hazardous"
+    ]
+  },
+  "tags": [
+    "roman_urdu",
+    "relative_date"
+  ],
+  "label_note": "Saturday after Thursday 2026-10-08 = 2026-10-10. 40ft containers = FCL."
+}

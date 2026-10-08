@@ -1,0 +1,16 @@
+{
+  "id": "other_003",
+  "from": "Careers <noreply@jobboard.example>",
+  "subject": "New applicant for Logistics Coordinator",
+  "body": "A new candidate applied for your Logistics Coordinator job. View the application on JobBoard.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "notification"
+  ]
+}

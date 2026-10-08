@@ -1,0 +1,16 @@
+{
+  "id": "other_007",
+  "from": "Truck Expo <events@truckexpo.example>",
+  "subject": "Invitation: Truck Expo Lahore 2026",
+  "body": "Join us at Truck Expo Lahore, 20-22 November. Register now for a free pass.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "newsletter"
+  ]
+}
