@@ -12,7 +12,9 @@ Exported workflow JSON lives in `workflows/`. Credentials are referenced by name
 
 ## Import
 
-The compose file mounts this folder read-only at `/workflows` in the n8n container:
+Quickest: `scripts/import_workflows.sh` (add `docker-compose.prod.yml` or `docker-compose.mocks.yml` as an
+argument when you use them). By hand: the compose file mounts this folder read-only at `/workflows` in the n8n
+container:
 
 ```bash
 docker compose exec n8n n8n import:workflow --input=/workflows/01_intake.json
@@ -22,14 +24,16 @@ docker compose exec n8n n8n import:workflow --input=/workflows/04_error.json
 docker compose exec n8n n8n import:workflow --input=/workflows/05_digest.json
 docker compose exec n8n n8n publish:workflow --id=wf2process000001   # activates WF2's retry webhook
 docker compose exec n8n n8n publish:workflow --id=wf3execute000001   # activates WF3's dashboard webhook
+docker compose exec n8n n8n publish:workflow --id=wf4error00000001   # error workflows only run when published
 docker compose exec n8n n8n publish:workflow --id=wf5digest0000001   # activates the 18:00 schedule
 docker compose restart n8n n8n-worker                                 # CLI publish takes effect on restart
 ```
 
 Or use the editor: **Workflows → Import from file**. Workflow IDs are fixed (`wf1intake0000001`,
 `wf2process000001`, `wf3execute000001`, `wf4error00000001`, `wf5digest0000001`), so the workflows already
-point at each other after import: WF1 → WF2 → WF3, and WF1–WF3 and WF5 use WF4 as their error workflow
-(an error workflow does not need to be published).
+point at each other after import: WF1 → WF2 → WF3, and WF1–WF3 and WF5 use WF4 as their error workflow.
+WF4 must be published too: n8n only runs a published error workflow. `scripts/import_workflows.sh` does all
+of this in one go.
 
 ## Credentials to create in n8n
 

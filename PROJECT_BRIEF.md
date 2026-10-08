@@ -4,7 +4,7 @@
 > before coding started. A new chat (or a new developer) should read this file first, then build milestone by
 > milestone (Section 16). If something here conflicts with a later decision, update this file.
 >
-> Written: 2026-10-08. Status: M0 done; M1–M5 built (see Section 21 for decisions made while building).
+> Written: 2026-10-08. Status: M0–M5 built; M6 built except the steps that need accounts (first eval run with an API key, live VPS, demo video) (see Section 21 for decisions made while building).
 
 ---
 
@@ -736,3 +736,8 @@ Times assume about 4–6 focused hours a day. Do not start a milestone until the
 | 2026-10-08 | `/` is the review queue (needs review, awaiting approval, failed); all emails at `/emails/`. HTMX is served from `static/` (2.0.4), used for filters and the "Check" button. | Reviewers land on what needs them; no CDN dependency. |
 | 2026-10-08 | WF5 has a manual "Run now" trigger next to the schedule. | The CLI and the editor can send the digest on demand. |
 | 2026-10-08 | `purge_old_bodies` management command for the 90-day body retention (Section 12). | Keeps metrics; deletes text. |
+| 2026-10-08 | Production = `docker-compose.prod.yml` overlay: Caddy publishes 80/443 only; it answers 404 for `/internal/*` and for n8n's `/webhook/process` and `/webhook/execute` (Django reaches them on the Docker network); `/webhook-waiting/` stays public for Slack approval links. `ACME_EMAIL` is required. | Section 12: internal routes never public. |
+| 2026-10-08 | WF4 (error workflow) must be published; `scripts/import_workflows.sh` imports all five and publishes WF2–WF5. WF1 is published by hand after Gmail is connected. | Found by the fresh-clone test: an unpublished error workflow never runs in n8n 2.x. |
+| 2026-10-08 | `scripts/backup.sh` dumps both databases and saves the n8n encryption key line next to them (newest 14 kept); `scripts/restore.sh` refuses to run if `.env` holds a different key. | Section 16 M6; restoring n8n without its key loses every credential. |
+| 2026-10-08 | Screenshots in `docs/screenshots/` are from offline demo mode (mocks) and say so; README and case-study results tables stay "pending" until the first real evaluation report. | Section 18: real numbers only. |
+| 2026-10-08 | The demo video can't be recorded from this environment; `docs/demo-script.md` is a shot-by-shot script mapped to the real UI. | Needs real accounts and a screen recorder. |
