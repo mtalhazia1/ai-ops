@@ -4,7 +4,7 @@
 > before coding started. A new chat (or a new developer) should read this file first, then build milestone by
 > milestone (Section 16). If something here conflicts with a later decision, update this file.
 >
-> Written: 2026-10-08. Status: M0 done; M1–M4 built (see Section 21 for decisions made while building).
+> Written: 2026-10-08. Status: M0 done; M1–M5 built (see Section 21 for decisions made while building).
 
 ---
 
@@ -730,3 +730,9 @@ Times assume about 4–6 focused hours a day. Do not start a milestone until the
 | 2026-10-08 | Gmail labels are set through `messages.modify` with label IDs from env (`GMAIL_LABEL_*_ID`). | The Gmail API needs IDs, not names; no manual node edits after import. |
 | 2026-10-08 | `/draft` and `/approval` set the status themselves (`awaiting_approval`, `approved`/`rejected`); a repeated call returns the saved result. `failed → approved` is allowed when a decision already exists, so a send failure resumes at sending. | Re-runs are safe; a failed send doesn't need a new draft and approval. |
 | 2026-10-08 | Eval runner drafts every auto-routed email and reports "draft checks passed" (flag `--no-drafts`). | Section 14 metric. |
+| 2026-10-08 | Every internal call from n8n sends `X-N8N-Execution-Id`; Django stores the last execution per email, and `/internal/failures` uses it to find the email. | n8n's Error Trigger payload has no business data; this avoids needing the n8n API. |
+| 2026-10-08 | Retry: with an approval on record, resume at sending (WF3); otherwise `failed → received` and WF2, which reuses the saved triage instead of a new LLM call. Recording a failure frees the run's claims. | Retries are cheap and repeat only what didn't happen. |
+| 2026-10-08 | Dashboard decisions go through WF3's webhook (same path as Slack), recorded with the Django username. Human-edited replies get the same output checks as warnings; sending anyway needs an explicit "Send anyway". Detail corrections are saved as a new `Triage` row (`model_classify = human:<user>`). | One sending path; audit trail of who changed what. |
+| 2026-10-08 | `/` is the review queue (needs review, awaiting approval, failed); all emails at `/emails/`. HTMX is served from `static/` (2.0.4), used for filters and the "Check" button. | Reviewers land on what needs them; no CDN dependency. |
+| 2026-10-08 | WF5 has a manual "Run now" trigger next to the schedule. | The CLI and the editor can send the digest on demand. |
+| 2026-10-08 | `purge_old_bodies` management command for the 90-day body retention (Section 12). | Keeps metrics; deletes text. |

@@ -89,6 +89,7 @@ LOGGING = {
 # --- AI Ops Inbox ----------------------------------------------------------------
 INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "")
 N8N_EXECUTE_WEBHOOK_URL = os.environ.get("N8N_EXECUTE_WEBHOOK_URL", "")
+N8N_PROCESS_WEBHOOK_URL = os.environ.get("N8N_PROCESS_WEBHOOK_URL", "")
 N8N_WEBHOOK_SECRET = os.environ.get("N8N_WEBHOOK_SECRET", "")
 DASHBOARD_BASE_URL = os.environ.get("DASHBOARD_BASE_URL", "http://localhost:8001")
 

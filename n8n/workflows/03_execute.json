@@ -161,6 +161,10 @@
             {
               "name": "X-Internal-Token",
               "value": "={{ $env.INTERNAL_TOKEN }}"
+            },
+            {
+              "name": "X-N8N-Execution-Id",
+              "value": "={{ $execution.id }}"
             }
           ]
         },
@@ -298,6 +302,10 @@
             {
               "name": "X-Internal-Token",
               "value": "={{ $env.INTERNAL_TOKEN }}"
+            },
+            {
+              "name": "X-N8N-Execution-Id",
+              "value": "={{ $execution.id }}"
             }
           ]
         },
@@ -422,6 +430,10 @@
             {
               "name": "X-Internal-Token",
               "value": "={{ $env.INTERNAL_TOKEN }}"
+            },
+            {
+              "name": "X-N8N-Execution-Id",
+              "value": "={{ $execution.id }}"
             }
           ]
         },
@@ -458,6 +470,10 @@
             {
               "name": "X-Internal-Token",
               "value": "={{ $env.INTERNAL_TOKEN }}"
+            },
+            {
+              "name": "X-N8N-Execution-Id",
+              "value": "={{ $execution.id }}"
             }
           ]
         },

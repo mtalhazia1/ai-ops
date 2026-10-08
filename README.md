@@ -16,7 +16,8 @@ the portfolio README is written at M6.
 | M2 Triage | Code, prompts, 22 labelled emails and `run_eval` done; needs an `ANTHROPIC_API_KEY` run to check the ≥85% target |
 | M3 Routing and actions | WF2 built and verified end to end against mocks (HubSpot, ShipMatch on/off, Slack, review routing, idempotency under parallel runs). Needs real HubSpot/Slack/ShipMatch credentials for the live check |
 | M4 Drafts, approval, sending | Drafting with output checks, playbook editor, Slack approval with timeout, WF3 sending in thread. Verified end to end against mocks (approve, double click, bot click, reject, blocked draft, timeout, send failure and resume). Needs real Gmail/Slack for the live check |
-| M5–M6 | Not started |
+| M5 Dashboard and failures | Review queue, email workspace (edit details, re-draft, approve/edit/reject via WF3), failures with Retry, metrics, WF4 error handler, WF5 digest, body retention. Verified end to end against mocks (bad HubSpot token → alert + failure row → Retry after fix → dashboard approval sent) |
+| M6 | Not started |
 
 ## Quick start
 
@@ -28,7 +29,10 @@ docker compose exec app python manage.py createsuperuser
 
 | URL | What |
 |---|---|
-| http://localhost:8001/ | Dashboard (log in with the superuser) |
+| http://localhost:8001/ | Review queue: emails waiting for a person (log in with the superuser) |
+| http://localhost:8001/emails/ | All emails; each opens a workspace with the timeline, details editor and reply editor |
+| http://localhost:8001/failures/ | Failed executions with Retry |
+| http://localhost:8001/metrics/ | Today / 7 / 30 days: handled, automatic vs reviewed, time to reply, AI cost, injections, failures |
 | http://localhost:8001/playbook/ | Playbook editor (company facts, tone, signature for drafts) |
 | http://localhost:8001/admin/ | Django admin |
 | http://localhost:5678/ | n8n editor |
@@ -55,9 +59,16 @@ Every route needs `X-Internal-Token: $INTERNAL_TOKEN`; anything else gets 401.
 | `POST /internal/emails/{id}/status` | State change; disallowed transitions return 409 |
 | `POST /internal/emails/{id}/actions/claim` | Reserve an idempotency key before an outside call → `{proceed, done, response}` |
 | `GET/POST /internal/emails/{id}/actions` | Log outside actions with a unique idempotency key; `?key=` checks whether one was done |
-| `POST /internal/failures` | WF4 error handler; marks the email `failed` |
+| `POST /internal/failures` | WF4 error handler: finds the email (by ID or by the execution that last touched it), marks it `failed`, frees its claims, returns the Slack alert text |
+| `GET /internal/metrics?period=today\|7d\|30d` | Metrics + digest text for WF5 |
 
 `GET /healthz` is an unauthenticated liveness probe for Docker.
+
+## Data retention
+
+`python manage.py purge_old_bodies` deletes email bodies, drafts and sent text older than
+`EMAIL_BODY_RETENTION_DAYS` (default 90) and keeps every row, status, cost and action, so metrics and the
+audit trail stay. Run it daily from cron: `docker compose exec -T app python manage.py purge_old_bodies`.
 
 ## Development
 

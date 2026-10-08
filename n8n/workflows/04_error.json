@@ -1,0 +1,143 @@
+{
+  "name": "WF4 Error handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "134ea797-8f35-5d19-af76-becd59c83d22",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The Error Trigger payload differs for trigger failures (no execution yet) and run failures.\nconst d = $json;\nconst ex = d.execution || {};\nconst err = ex.error || (d.trigger && d.trigger.error) || {};\nreturn [{ json: {\n  workflow: (d.workflow && d.workflow.name) || '',\n  node: ex.lastNodeExecuted || (err.node && err.node.name) || (d.trigger ? 'trigger' : ''),\n  error: String(err.message || err.description || 'unknown error').slice(0, 2000),\n  execution_id: String(ex.id || ''),\n  execution_url: ex.url || '',\n} }];"
+      },
+      "id": "5c16e64e-e113-5f4d-94b2-c240d57fc353",
+      "name": "Failure details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/failures",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            },
+            {
+              "name": "X-N8N-Execution-Id",
+              "value": "={{ $execution.id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow: $json.workflow, node: $json.node, error: $json.error, execution_id: $json.execution_id }) }}"
+      },
+      "id": "aad7b4a7-d045-5f83-98e9-ba8215fe4a75",
+      "name": "Record failure (Django)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.SLACK_API_URL || 'https://slack.com/api') }}/chat.postMessage",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $env.SLACK_CHANNEL_ALERTS || '#ops-alerts', text: ($json.alert_text || (':warning: *' + $('Failure details').item.json.workflow + '* failed at *' + $('Failure details').item.json.node + '*: ' + $('Failure details').item.json.error + ' (Django did not record it)')) + ($('Failure details').item.json.execution_url ? '\\n<' + $('Failure details').item.json.execution_url + '|Open execution in n8n>' : ''), unfurl_links: false, unfurl_media: false }) }}"
+      },
+      "id": "a231a342-bc3d-537c-876a-f91efafb575a",
+      "name": "Slack #ops-alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "Slack"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Failure details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Failure details": {
+      "main": [
+        [
+          {
+            "node": "Record failure (Django)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record failure (Django)": {
+      "main": [
+        [
+          {
+            "node": "Slack #ops-alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Karachi"
+  },
+  "pinData": {},
+  "active": false,
+  "id": "wf4error00000001",
+  "tags": []
+}

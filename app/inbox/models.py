@@ -47,6 +47,9 @@ class Email(models.Model):
     category = models.CharField(max_length=32, choices=Category.choices, null=True, blank=True)
     urgency = models.CharField(max_length=16, choices=Urgency.choices, null=True, blank=True)
     needs_review_reason = models.TextField(null=True, blank=True)
+    # The n8n execution that last called the internal API for this email; lets the
+    # error workflow (WF4) tie a failed execution back to its email.
+    last_execution_id = models.CharField(max_length=100, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

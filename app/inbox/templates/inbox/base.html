@@ -4,17 +4,23 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}AI Ops Inbox{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'inbox/style.css' %}">
+  <script src="{% static 'inbox/htmx.min.js' %}" defer></script>
 </head>
-<body>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
 <header>
   <strong>AI Ops Inbox</strong>
-  <a href="{% url 'inbox:email_list' %}">Emails</a>
-  <a href="{% url 'inbox:playbook' %}">Playbook</a>
-  <a href="{% url 'inbox:eval_list' %}">Evaluations</a>
-  <a href="/admin/">Admin</a>
+  <nav>
+    <a href="{% url 'inbox:review_queue' %}">Review queue</a>
+    <a href="{% url 'inbox:email_list' %}">All emails</a>
+    <a href="{% url 'inbox:failures' %}">Failures</a>
+    <a href="{% url 'inbox:metrics' %}">Metrics</a>
+    <a href="{% url 'inbox:playbook' %}">Playbook</a>
+    <a href="{% url 'inbox:eval_list' %}">Evaluations</a>
+    <a href="/admin/">Admin</a>
+  </nav>
 </header>
 <main>
-  {% for message in messages %}<p class="flash">{{ message }}</p>{% endfor %}
+  {% for message in messages %}<p class="flash {{ message.tags }}">{{ message }}</p>{% endfor %}
   {% block content %}{% endblock %}
 </main>
 </body>

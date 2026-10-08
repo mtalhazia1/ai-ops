@@ -1,0 +1,11 @@
+{% for e in emails %}
+<tr>
+  <td class="muted nowrap">{{ e.received_at|date:"M j, H:i" }}</td>
+  <td>{{ e.from_name|default:e.from_email }}</td>
+  <td><a href="{% url 'inbox:email_detail' e.pk %}">{{ e.subject|default:"(no subject)"|truncatechars:70 }}</a>
+    {% if e.needs_review_reason and e.status == "needs_review" %}<br><small class="muted">{{ e.needs_review_reason|truncatechars:90 }}</small>{% endif %}</td>
+  <td>{{ e.category|default:"–" }}</td>
+  <td>{% if e.urgency == "high" %}<span class="pill failed">high</span>{% else %}{{ e.urgency|default:"–" }}{% endif %}</td>
+  <td><span class="pill {{ e.status }}">{{ e.status }}</span></td>
+</tr>
+{% empty %}<tr><td colspan="6" class="muted">Nothing here.</td></tr>{% endfor %}

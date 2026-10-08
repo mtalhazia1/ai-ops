@@ -23,7 +23,8 @@ def test_dashboard_pages_render(admin_client, api, fake_llm):
     fake_llm()
     email_id = api("post", "/emails", PAYLOAD).json()["id"]
     api("post", f"/emails/{email_id}/triage")
-    assert b"rate pls" in admin_client.get("/").content
+    assert b"rate pls" in admin_client.get("/emails/").content
+    assert b"rate pls" not in admin_client.get("/").content  # triaged: not waiting for a person
     detail = admin_client.get(f"/emails/{email_id}/")
     assert detail.status_code == 200 and b"quote_request" in detail.content
     assert admin_client.get("/evals/").status_code == 200

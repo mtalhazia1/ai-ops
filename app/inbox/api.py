@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import re
 from datetime import datetime, timedelta
 from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any, Optional
@@ -15,11 +16,12 @@ from ninja import NinjaAPI, Schema
 from ninja.security import APIKeyHeader
 from pydantic import ConfigDict, Field
 
-from . import mail, process, state
+from . import mail, metrics, process, services, state
 from .cleaning import clean_body
-from .llm.draft import DraftInput, PlaybookData, draft_reply, reply_subject
+from .llm.draft import reply_subject
 from .llm.triage import EmailInput, triage
-from .models import Action, Approval, Draft, Email, Failure, Playbook, Status, Triage
+from .models import Action, Approval, Draft, Email, Failure, Status, Triage
+from .services import release_pending_claims
 
 
 class InternalToken(APIKeyHeader):
@@ -28,8 +30,22 @@ class InternalToken(APIKeyHeader):
     def authenticate(self, request, key):
         expected = settings.INTERNAL_TOKEN
         if expected and key and hmac.compare_digest(key, expected):
+            _note_execution(request)
             return "n8n"
         return None
+
+
+_EMAIL_PATH = re.compile(r"/internal/emails/(\d+)(/|$)")
+
+
+def _note_execution(request) -> None:
+    """Remember which n8n execution last worked on an email (header X-N8N-Execution-Id).
+    Saved straight away, outside any transaction, so it survives a failing request."""
+    execution_id = (request.headers.get("X-N8N-Execution-Id") or "").strip()[:100]
+    match = _EMAIL_PATH.search(request.path)
+    if execution_id and match:
+        Email.objects.filter(pk=int(match.group(1))).exclude(last_execution_id=execution_id).update(
+            last_execution_id=execution_id)
 
 
 api = NinjaAPI(title="AI Ops Inbox internal API", auth=InternalToken(), urls_namespace="internal", docs_url=None)
@@ -116,6 +132,7 @@ def create_email(request, payload: EmailIn):
                 body_clean=clean_body(payload.text, payload.html),
                 attachments=[a.dict() for a in payload.attachments],
                 received_at=_parse_date(payload.date),
+                last_execution_id=(request.headers.get("X-N8N-Execution-Id") or "")[:100],
             )
     except IntegrityError:  # lost a race with a parallel execution
         email = Email.objects.get(gmail_message_id=payload.gmail_message_id)
@@ -150,6 +167,13 @@ def triage_email(request, email_id: int):
             return process.payload(email, email.latest_triage, rerun=True)
         if not state.can_transition(email.status, Status.TRIAGED):
             raise state.InvalidTransition(email.status, Status.TRIAGED)
+        if email.latest_triage:
+            # Retry after a failure (failed → received): keep the saved triage, including
+            # any corrections made in the dashboard, and don't pay for another LLM call.
+            saved = email.latest_triage
+            state.transition(email, Status.NEEDS_REVIEW if saved.route == "review" else Status.TRIAGED,
+                             reason=saved.review_reason or None)
+            return process.payload(email, saved, rerun=True)
 
         result = triage(
             EmailInput(
@@ -191,11 +215,6 @@ def triage_email(request, email_id: int):
 
 # --- Draft ------------------------------------------------------------------------
 
-def _lookups(email: Email) -> list[dict[str, Any]]:
-    latest = email.actions.filter(kind="shipmatch_lookup", ok=True).order_by("-created_at", "-id").first()
-    return (latest.response or {}).get("results", []) if latest else []
-
-
 def _draft_out(email: Email, draft: Draft, *, rerun: bool) -> dict[str, Any]:
     triage_row = email.latest_triage
     out = {
@@ -228,29 +247,11 @@ def draft_email(request, email_id: int):
         # stays with the reviewer (the dashboard can re-draft).
         if email.status != Status.TRIAGED:
             raise state.InvalidTransition(email.status, Status.AWAITING_APPROVAL)
-        triage_row = email.latest_triage
-        result = draft_reply(
-            DraftInput(
-                category=triage_row.category,
-                fields=triage_row.fields,
-                missing_fields=triage_row.missing_fields,
-                subject=email.subject,
-                from_name=email.from_name,
-                lookups=_lookups(email),
-                lookups_available=settings.SHIPMATCH_ENABLED,
-                source_text="\n".join([email.subject, email.body_text, email.from_email, email.reply_to]),
-            ),
-            PlaybookData.from_model(Playbook.get()),
-        )
-        draft = Draft.objects.create(
-            email=email, subject=result.subject, body=result.body, asks_for=result.asks_for, ok=result.ok,
-            blocked_reason=result.blocked_reason, model=result.model, input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens, cost_usd=result.cost_usd, latency_ms=result.latency_ms,
-        )
-        if result.ok:
+        draft = services.create_draft(email)
+        if draft.ok:
             state.transition(email, Status.AWAITING_APPROVAL)
         else:
-            state.transition(email, Status.NEEDS_REVIEW, reason=f"draft blocked: {result.blocked_reason}"[:1000])
+            state.transition(email, Status.NEEDS_REVIEW, reason=f"draft blocked: {draft.blocked_reason}"[:1000])
     return _draft_out(email, draft, rerun=False)
 
 
@@ -383,17 +384,6 @@ class ClaimIn(Schema):
 CLAIM_TTL = timedelta(minutes=10)
 
 
-def release_pending_claims(email: Email) -> int:
-    """A failed run never finishes its claimed actions; free them so a retry repeats them."""
-    released = 0
-    for action in Action.objects.filter(email=email, ok=False):
-        if action.response.get("pending"):
-            action.response = {"released": True, "claimed_at": action.response.get("claimed_at")}
-            action.save(update_fields=["response"])
-            released += 1
-    return released
-
-
 @api.post("/emails/{email_id}/actions/claim")
 def claim_action(request, email_id: int, payload: ClaimIn):
     """Atomically reserve an idempotency key before an outside call.
@@ -465,7 +455,15 @@ class FailureIn(Schema):
 
 @api.post("/failures")
 def record_failure(request, payload: FailureIn):
-    email = Email.objects.filter(pk=payload.email_id).first() if payload.email_id else None
+    """WF4: one row per failed execution. The email is the one named in the payload, or
+    else the one this execution last worked on."""
+    email = None
+    if payload.email_id:
+        email = Email.objects.filter(pk=payload.email_id).first()
+    elif payload.execution_id:
+        # One WF1 run can take in several emails; only attach when the match is unambiguous.
+        matches = list(Email.objects.filter(last_execution_id=payload.execution_id)[:2])
+        email = matches[0] if len(matches) == 1 else None
     failure = Failure.objects.create(
         email=email,
         workflow=payload.workflow[:255],
@@ -477,4 +475,22 @@ def record_failure(request, payload: FailureIn):
         release_pending_claims(email)
     if email and state.can_transition(email.status, Status.FAILED):
         state.transition(email, Status.FAILED, reason=f"{payload.workflow} failed at {payload.node}: {payload.error}"[:1000])
-    return {"id": failure.id, "email_status": email.status if email else None}
+    link = process.dashboard_url(email) if email else f"{settings.DASHBOARD_BASE_URL.rstrip('/')}/failures/"
+    alert = (f":warning: *{process.slack_escape(payload.workflow or 'Workflow')}* failed at "
+             f"*{process.slack_escape(payload.node or '?')}*: {process.slack_escape(payload.error[:300])}\n"
+             + (f"Email: {process.slack_escape(email.subject or '(no subject)')} from {process.slack_escape(email.from_email)}\n"
+                if email else "")
+             + f"<{link}|Open in dashboard>")
+    return {"id": failure.id, "email_id": email.id if email else None,
+            "email_status": email.status if email else None, "alert_text": alert}
+
+
+# --- Metrics (WF5 digest, dashboard) --------------------------------------------------
+
+@api.get("/metrics")
+def get_metrics(request, period: str = "today"):
+    if period not in metrics.PERIODS:
+        return api.create_response(request, {"detail": f"period must be one of {', '.join(metrics.PERIODS)}"}, status=422)
+    data = metrics.compute(period)
+    data["digest_text"] = metrics.digest_text(data)
+    return data

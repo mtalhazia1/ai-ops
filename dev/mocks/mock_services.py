@@ -139,6 +139,12 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _auth(self):
+        if self.headers.get("Authorization") == "Bearer pat-bad":  # simulates a revoked HubSpot token
+            with LOCK:
+                STATE["unauthorized"] += 1
+            self._send(401, {"status": "error", "message": "Authentication credentials not found.",
+                             "category": "INVALID_AUTHENTICATION"})
+            return False
         if not (self.headers.get("Authorization") or self.headers.get("x-api-key")):
             with LOCK:
                 STATE["unauthorized"] += 1
