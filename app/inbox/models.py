@@ -31,6 +31,10 @@ class Status(models.TextChoices):
 class Email(models.Model):
     gmail_message_id = models.CharField(max_length=255, unique=True)
     gmail_thread_id = models.CharField(max_length=255, blank=True)
+    # RFC 5322 headers, used to thread the reply (In-Reply-To / References).
+    rfc_message_id = models.CharField(max_length=998, blank=True)
+    references = models.TextField(blank=True)
+    reply_to = models.CharField(max_length=320, blank=True)
     from_email = models.CharField(max_length=320)
     from_name = models.CharField(max_length=255, blank=True)
     to_email = models.CharField(max_length=320, blank=True)

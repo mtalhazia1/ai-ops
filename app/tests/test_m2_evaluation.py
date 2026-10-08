@@ -74,5 +74,6 @@ def test_run_eval_command_writes_report(db, fake_llm, settings, tmp_path):
     call_command("run_eval", "--dataset", str(dataset), "--limit", "5", "--workers", "1")
     run = EvalRun.objects.get()
     assert run.metrics["emails"] == 5
+    assert run.metrics["drafts_checked"] >= 1 and run.metrics["draft_checks_passed"] == 1.0
     assert (tmp_path / run.report_path).exists()
     assert (tmp_path / run.report_path).with_suffix(".html").exists()

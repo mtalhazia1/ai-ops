@@ -58,7 +58,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Turn a Gmail API message (format=full) into the payload Django's /internal/emails expects.\nconst decode = (data) => data ? Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8') : '';\n\nreturn $input.all().map(({ json: msg }) => {\n  const headers = {};\n  for (const h of (msg.payload?.headers || [])) headers[h.name.toLowerCase()] = h.value;\n\n  let text = '', html = '';\n  const attachments = [];\n  const walk = (part) => {\n    if (!part) return;\n    if (part.filename && part.body?.attachmentId) {\n      attachments.push({\n        filename: part.filename,\n        mime: part.mimeType || '',\n        size: part.body.size || 0,\n        gmail_attachment_id: part.body.attachmentId,\n      });\n    } else if (part.mimeType === 'text/plain' && !text) {\n      text = decode(part.body?.data);\n    } else if (part.mimeType === 'text/html' && !html) {\n      html = decode(part.body?.data);\n    }\n    (part.parts || []).forEach(walk);\n  };\n  walk(msg.payload);\n\n  return {\n    json: {\n      gmail_message_id: msg.id,\n      gmail_thread_id: msg.threadId,\n      from: headers['from'] || '',\n      to: headers['to'] || '',\n      subject: headers['subject'] || '',\n      date: headers['date'] || null,\n      text,\n      html,\n      attachments,\n    },\n  };\n});"
+        "jsCode": "// Turn a Gmail API message (format=full) into the payload Django's /internal/emails expects.\nconst decode = (data) => data ? Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8') : '';\n\nreturn $input.all().map(({ json: msg }) => {\n  const headers = {};\n  for (const h of (msg.payload?.headers || [])) headers[h.name.toLowerCase()] = h.value;\n\n  let text = '', html = '';\n  const attachments = [];\n  const walk = (part) => {\n    if (!part) return;\n    if (part.filename && part.body?.attachmentId) {\n      attachments.push({\n        filename: part.filename,\n        mime: part.mimeType || '',\n        size: part.body.size || 0,\n        gmail_attachment_id: part.body.attachmentId,\n      });\n    } else if (part.mimeType === 'text/plain' && !text) {\n      text = decode(part.body?.data);\n    } else if (part.mimeType === 'text/html' && !html) {\n      html = decode(part.body?.data);\n    }\n    (part.parts || []).forEach(walk);\n  };\n  walk(msg.payload);\n\n  return {\n    json: {\n      gmail_message_id: msg.id,\n      gmail_thread_id: msg.threadId,\n      from: headers['from'] || '',\n      to: headers['to'] || '',\n      reply_to: headers['reply-to'] || '',\n      message_id: headers['message-id'] || '',\n      references: headers['references'] || '',\n      subject: headers['subject'] || '',\n      date: headers['date'] || null,\n      text,\n      html,\n      attachments,\n    },\n  };\n});"
       },
       "id": "a1b2c3d4-0003-4000-8000-000000000003",
       "name": "Build payload",
@@ -135,16 +135,19 @@
     },
     {
       "parameters": {
-        "operation": "addLabels",
-        "messageId": "={{ $('Build payload').item.json.gmail_message_id }}",
-        "labelIds": [
-          "REPLACE_WITH_ai-processing_LABEL_ID"
-        ]
+        "method": "POST",
+        "url": "={{ ($env.GMAIL_API_URL || 'https://gmail.googleapis.com') }}/gmail/v1/users/me/messages/{{ $('Build payload').item.json.gmail_message_id }}/modify",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ addLabelIds: [$env.GMAIL_LABEL_PROCESSING_ID].filter(Boolean) }) }}",
+        "options": {}
       },
       "id": "a1b2c3d4-0006-4000-8000-000000000006",
       "name": "Label ai-processing",
-      "type": "n8n-nodes-base.gmail",
-      "typeVersion": 2.1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         1100,
         -100

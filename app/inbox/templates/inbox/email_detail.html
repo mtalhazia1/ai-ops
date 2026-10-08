@@ -23,6 +23,20 @@
   </tr>
   {% empty %}<tr><td colspan="8" class="muted">Not triaged yet.</td></tr>{% endfor %}
 </table>
+<h3>Drafts</h3>
+{% for d in drafts %}
+  <p class="muted">{{ d.created_at|date:"M j, H:i" }} · {{ d.model }} · ${{ d.cost_usd }} ·
+    {% if d.ok %}passed checks{% else %}<strong>blocked:</strong> {{ d.blocked_reason }}{% endif %}</p>
+  <pre>{{ d.subject }}
+
+{{ d.body }}</pre>
+{% empty %}<p class="muted">No draft.</p>{% endfor %}
+<h3>Decisions</h3>
+<table>
+  <tr><th>When</th><th>Channel</th><th>Reviewer</th><th>Decision</th></tr>
+  {% for a in approvals %}<tr><td class="muted">{{ a.decided_at|date:"M j, H:i" }}</td><td>{{ a.channel }}</td><td>{{ a.reviewer }}</td><td>{{ a.decision }}</td></tr>
+  {% empty %}<tr><td colspan="4" class="muted">None yet.</td></tr>{% endfor %}
+</table>
 <h3>Actions</h3>
 <table>
   <tr><th>When</th><th>Kind</th><th>Key</th><th>OK</th></tr>

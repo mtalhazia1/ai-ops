@@ -1,14 +1,16 @@
-"""Dashboard pages. M0-M2: a read-only list, detail and evaluation reports.
-The review queue, editing and approvals arrive in M4/M5."""
+"""Dashboard pages: email list and detail, playbook editor, evaluation reports.
+The review queue with editing and approvals arrives in M5."""
 
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 
-from .models import Email, EvalRun, Status
+from .forms import PlaybookForm
+from .models import Email, EvalRun, Playbook, Status
 
 
 @login_required
@@ -37,6 +39,8 @@ def email_detail(request, pk):
             "email": email,
             "triages": email.triages.order_by("-created_at"),
             "actions": email.actions.order_by("created_at"),
+            "drafts": email.drafts.order_by("-created_at"),
+            "approvals": email.approvals.order_by("-decided_at"),
             "failures": email.failures.order_by("-created_at"),
         },
     )
@@ -58,3 +62,16 @@ def eval_report(request, pk):
     if not html_path.exists() or reports_dir not in html_path.resolve().parents:
         raise Http404("report not found")
     return HttpResponse(html_path.read_text())
+
+
+@login_required
+def playbook(request):
+    obj = Playbook.get()
+    form = PlaybookForm(request.POST or None, instance=obj)
+    if request.method == "POST" and form.is_valid():
+        saved = form.save(commit=False)
+        saved.updated_by = request.user.get_username()
+        saved.save()
+        messages.success(request, "Playbook saved. New drafts use it straight away.")
+        return redirect("inbox:playbook")
+    return render(request, "inbox/playbook.html", {"form": form, "playbook": obj})

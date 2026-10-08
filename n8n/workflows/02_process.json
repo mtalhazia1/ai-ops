@@ -168,6 +168,29 @@
     },
     {
       "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1a4299c2-cbe9-5130-a39c-ecb01152e69e",
+              "name": "review_text",
+              "value": "={{ $json.review_text || $('Triage (Django)').item.json.review_text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0be53e78-0cb0-5d87-aaff-2882c25cc151",
+      "name": "Review text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1100,
+        -400
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
         "options": {},
@@ -189,7 +212,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1100,
+        1320,
         -400
       ],
       "retryOnFail": true,
@@ -226,7 +249,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1320,
+        1540,
         -400
       ]
     },
@@ -239,14 +262,14 @@
         "nodeCredentialType": "slackApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ channel: $env.SLACK_CHANNEL_REVIEW || '#ops-review', text: ($('Triage (Django)').item.json.route === 'review' ? $('Triage (Django)').item.json.slack.review_text : $('Triage (Django)').item.json.slack.paperwork_review_text), unfurl_links: false, unfurl_media: false }) }}"
+        "jsonBody": "={{ JSON.stringify({ channel: $env.SLACK_CHANNEL_REVIEW || '#ops-review', text: $('Review text').item.json.review_text, unfurl_links: false, unfurl_media: false }) }}"
       },
       "id": "0805307c-4916-571c-a8fb-08fe74672874",
       "name": "Slack #ops-review",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1540,
+        1760,
         -400
       ],
       "retryOnFail": true,
@@ -289,7 +312,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1760,
+        1980,
         -400
       ]
     },
@@ -302,7 +325,7 @@
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
       "position": [
-        1980,
+        2200,
         -280
       ]
     },
@@ -329,7 +352,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1980,
+        2200,
         -420
       ],
       "retryOnFail": true,
@@ -1572,6 +1595,613 @@
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { email_id: $('Triage (Django)').first().json.id } }];"
+      },
+      "id": "3b2b022e-7cb0-551f-8318-e7834861e80a",
+      "name": "Ready for draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4000,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $json.email_id }}/draft",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "ccf80443-0c15-54f7-8401-2b72ee0089cb",
+      "name": "Draft (Django)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4220,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f5b4d3db-9241-5b97-83ab-d8ab522ffc4f",
+              "leftValue": "={{ $json.ok === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "847feac2-a59c-5e83-907d-d0e762f1245a",
+      "name": "Draft passed checks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4440,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "369b0dd1-caea-5af5-a171-33d0a4c9749a",
+              "leftValue": "={{ $json.ok === false }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1e39423d-7dc4-5e0d-8ca9-f086294e3145",
+      "name": "Draft blocked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4660,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval' }) }}"
+      },
+      "id": "fd4f6b94-0892-5afb-9268-8da4a4fbe364",
+      "name": "Claim approval message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4660,
+        380
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4c847110-c8a6-5af4-883d-6834035f32b2",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4cec5a8a-ec9e-51aa-98b8-3486c0f84355",
+      "name": "Post approval?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4880,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.SLACK_API_URL || 'https://slack.com/api') }}/chat.postMessage",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $env.SLACK_CHANNEL_APPROVALS || '#ops-approvals', text: 'Approval needed: ' + $('Triage (Django)').item.json.subject, unfurl_links: false, unfurl_media: false, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: $('Draft (Django)').item.json.approval_text } }, { type: 'actions', elements: [{ type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Approve and send' }, url: $execution.resumeUrl + ($execution.resumeUrl.includes('?') ? '&' : '?') + 'decision=approve' }, { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Reject' }, url: $execution.resumeUrl + ($execution.resumeUrl.includes('?') ? '&' : '?') + 'decision=reject' }, { type: 'button', text: { type: 'plain_text', text: 'Edit in dashboard' }, url: $('Draft (Django)').item.json.dashboard_url }] }] }) }}"
+      },
+      "id": "1ccf5c84-495a-5414-a599-5764f737d35a",
+      "name": "Slack approval request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5100,
+        380
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ef963c39-7be0-5ff9-a3b7-8a276c1483c3",
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0345f4e7-4c30-574c-bf06-4781e113e814",
+      "name": "Slack approval ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5320,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Slack error: {{ $json.error }}"
+      },
+      "id": "62934cf6-412f-5016-8e85-458a16274405",
+      "name": "Slack approval failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        5540,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval', request: {}, response: { channel: $json.channel, ts: $json.ts }, ok: true }) }}"
+      },
+      "id": "e19fdfb0-899d-585b-8637-100e91931c45",
+      "name": "Log approval message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5540,
+        360
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "GET",
+        "responseMode": "onReceived",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": "={{ Number($env.APPROVAL_TIMEOUT_MINUTES || 1440) }}",
+        "resumeUnit": "minutes",
+        "options": {
+          "ignoreBots": true
+        }
+      },
+      "id": "f943c90e-287a-52fd-8efb-af80893f8f06",
+      "name": "Wait for decision",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5760,
+        360
+      ],
+      "webhookId": "c2018956-1035-55a1-8415-a859692cf87a"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "755c25da-f688-57ff-889b-bb0b9338ab3b",
+                    "leftValue": "={{ $json.query && $json.query.decision }}",
+                    "rightValue": "approve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "approve"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d5f68c78-bc37-5248-bedc-40bc374b1936",
+                    "leftValue": "={{ $json.query && $json.query.decision }}",
+                    "rightValue": "reject",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reject"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "timeout"
+        }
+      },
+      "id": "5d4d9d54-c1ca-5cc1-a859-92f3ace8e153",
+      "name": "Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        5980,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf3execute000001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email_id": "={{ $('Triage (Django)').item.json.id }}",
+            "decision": "approved",
+            "reviewer": "slack",
+            "channel": "slack",
+            "final_body": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "email_id",
+              "displayName": "email_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "decision",
+              "displayName": "decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "reviewer",
+              "displayName": "reviewer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "final_body",
+              "displayName": "final_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "60685b07-8add-54f2-9c1f-3b85f2ba2558",
+      "name": "Send reply (WF3)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6200,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wf3execute000001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email_id": "={{ $('Triage (Django)').item.json.id }}",
+            "decision": "rejected",
+            "reviewer": "slack",
+            "channel": "slack",
+            "final_body": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "email_id",
+              "displayName": "email_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "decision",
+              "displayName": "decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "reviewer",
+              "displayName": "reviewer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "final_body",
+              "displayName": "final_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "e41537eb-95f6-5aef-8970-35f8ed4d7f49",
+      "name": "Reject (WF3)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        6200,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/status",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'needs_review', reason: 'No decision in Slack before the approval timeout' }) }}"
+      },
+      "id": "7da90630-ca09-5e80-a375-6a707b75faa5",
+      "name": "Approval timed out",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6200,
+        560
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "134cffd8-dc0a-5f54-8ab3-3b58f1093945",
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "needs_review"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7aefa18f-175a-579b-992c-ca2d2986d3af",
+      "name": "Moved to review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6420,
+        560
+      ]
     }
   ],
   "connections": {
@@ -1663,7 +2293,7 @@
       "main": [
         [
           {
-            "node": "Claim review alert",
+            "node": "Review text",
             "type": "main",
             "index": 0
           }
@@ -1671,6 +2301,17 @@
         [
           {
             "node": "Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review text": {
+      "main": [
+        [
+          {
+            "node": "Claim review alert",
             "type": "main",
             "index": 0
           }
@@ -1870,6 +2511,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -1900,6 +2548,13 @@
         [
           {
             "node": "HubSpot create task",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ready for draft",
             "type": "main",
             "index": 0
           }
@@ -1990,7 +2645,7 @@
       "main": [
         [
           {
-            "node": "Claim review alert",
+            "node": "Review text",
             "type": "main",
             "index": 0
           }
@@ -2024,6 +2679,13 @@
         [
           {
             "node": "Gmail get attachment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ready for draft",
             "type": "main",
             "index": 0
           }
@@ -2119,6 +2781,250 @@
         [
           {
             "node": "Slack #ops-urgent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log note": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log task": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log lookup": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No lookup (ShipMatch off or no refs)": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log upload": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log claim alert": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready for draft": {
+      "main": [
+        [
+          {
+            "node": "Draft (Django)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft (Django)": {
+      "main": [
+        [
+          {
+            "node": "Draft passed checks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft passed checks?": {
+      "main": [
+        [
+          {
+            "node": "Claim approval message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Draft blocked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft blocked?": {
+      "main": [
+        [
+          {
+            "node": "Review text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim approval message": {
+      "main": [
+        [
+          {
+            "node": "Post approval?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post approval?": {
+      "main": [
+        [
+          {
+            "node": "Slack approval request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack approval request": {
+      "main": [
+        [
+          {
+            "node": "Slack approval ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack approval ok?": {
+      "main": [
+        [
+          {
+            "node": "Log approval message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack approval failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log approval message": {
+      "main": [
+        [
+          {
+            "node": "Wait for decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for decision": {
+      "main": [
+        [
+          {
+            "node": "Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision": {
+      "main": [
+        [
+          {
+            "node": "Send reply (WF3)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject (WF3)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Approval timed out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval timed out": {
+      "main": [
+        [
+          {
+            "node": "Moved to review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Moved to review?": {
+      "main": [
+        [
+          {
+            "node": "Review text",
             "type": "main",
             "index": 0
           }

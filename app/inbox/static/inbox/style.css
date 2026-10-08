@@ -13,3 +13,9 @@ th { font-weight:600; color:var(--muted); font-size:12px; text-transform:upperca
 pre { white-space:pre-wrap; background:#fff; border:1px solid var(--line); padding:10px; }
 form.filters { display:flex; gap:8px; margin-bottom:12px; }
 .muted { color:var(--muted); }
+form.stack { display:flex; flex-direction:column; gap:12px; max-width:720px; }
+form.stack label { display:flex; flex-direction:column; gap:4px; font-weight:600; }
+form.stack input, form.stack textarea { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:4px; width:100%; }
+form.stack button { align-self:flex-start; padding:6px 16px; }
+.flash { background:#ecfdf5; border:1px solid #a7f3d0; padding:8px 12px; }
+.error { color:var(--bad); }

@@ -121,6 +121,7 @@ def score(cases: list[Case], results: dict[str, dict[str, Any]]) -> dict[str, An
     inj_total = inj_ok = route_total = route_ok = review = 0
     latencies: list[float] = []
     costs: list[float] = []
+    drafts_total = drafts_ok = 0
 
     for case in cases:
         res = results.get(case.id) or {"error": "missing result"}
@@ -140,6 +141,13 @@ def score(cases: list[Case], results: dict[str, dict[str, Any]]) -> dict[str, An
                              "reason": res.get("reason", "")})
         if res["route"] == "review":
             review += 1
+        if "draft" in res:
+            drafts_total += 1
+            if res["draft"]["ok"]:
+                drafts_ok += 1
+            else:
+                failures.append({"id": case.id, "kind": "draft_blocked", "expected": "passes checks",
+                                 "actual": "; ".join(res["draft"]["problems"])})
         if "route" in exp:
             route_total += 1
             if res["route"] == exp["route"]:
@@ -202,7 +210,8 @@ def score(cases: list[Case], results: dict[str, dict[str, Any]]) -> dict[str, An
         "latency_p95_ms": round(_percentile(latencies, 0.95)),
         "cost_per_email_usd": round(sum(costs) / scored, 6) if scored else None,
         "cost_total_usd": round(sum(costs), 6),
-        "draft_checks_passed": None,  # drafts are evaluated from M4
+        "draft_checks_passed": _ratio(drafts_ok, drafts_total),
+        "drafts_checked": drafts_total,
         "confusion": {k: dict(v) for k, v in confusion.items()},
         "failures": failures,
     }
@@ -214,13 +223,14 @@ TARGETS = {
     "field_accuracy": 0.90,
     "no_invented_values": 1.0,
     "injection_caught": 1.0,
+    "draft_checks_passed": 0.95,
 }
 
 
 def summary_lines(metrics: dict[str, Any]) -> list[str]:
     lines = []
     for key in ["category_accuracy", "category_macro_f1", "field_accuracy", "no_invented_values", "injection_caught",
-                "route_accuracy", "review_rate", "latency_p50_ms", "latency_p95_ms", "cost_per_email_usd", "errors"]:
+                "route_accuracy", "draft_checks_passed", "review_rate", "latency_p50_ms", "latency_p95_ms", "cost_per_email_usd", "errors"]:
         value = metrics.get(key)
         target = TARGETS.get(key)
         mark = ""

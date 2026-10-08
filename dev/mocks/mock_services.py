@@ -6,6 +6,7 @@ POST /_reset. The "LLM" here is a few regexes: it exercises the plumbing, not ac
 """
 
 import base64
+import email as email_lib
 import itertools
 import json
 import re
@@ -28,7 +29,7 @@ def reset():
     with LOCK:
         STATE.clear()
         STATE.update({"contacts": {}, "deals": [], "notes": [], "tasks": [], "slack": [], "documents": [],
-                      "lookups": [], "llm_calls": 0, "unauthorized": 0})
+                      "lookups": [], "sent": [], "labels": {}, "llm_calls": 0, "unauthorized": 0})
 
 
 reset()
@@ -98,7 +99,18 @@ def llm(body):
         STATE["llm_calls"] += 1
     text = body["messages"][0]["content"]
     schema = body.get("output_config", {}).get("format", {}).get("schema", {})
-    if "category" in schema.get("properties", {}):
+    if "body" in schema.get("properties", {}):
+        data = json.loads(text.split("<data>", 1)[1].split("</data>", 1)[0])
+        name = data.get("sender_first_name") or "there"
+        asks = data.get("missing_fields") or []
+        lines = [f"Hi {name},", "", f"Thanks for your email about {data.get('original_subject')}. "
+                 f"Our team is on it ({data['category'].replace('_', ' ')})."]
+        if asks:
+            lines += ["", "Could you please send:"] + [f"- {a}" for a in asks]
+        if "evil" in json.dumps(data):  # lets a test force a blocked draft
+            lines.append("Details: https://evil.example/pay")
+        out = {"body": "\n".join(lines), "asks_for": asks}
+    elif "category" in schema.get("properties", {}):
         out = classify(text)
     else:
         fields = schema["properties"]["items"]["items"]["properties"]["field"]["enum"]
@@ -190,8 +202,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": False, "error": "channel_not_found"})
             ts = f"{next(IDS)}.000100"
             with LOCK:
-                STATE["slack"].append({"channel": data.get("channel"), "text": data.get("text"), "ts": ts})
+                STATE["slack"].append({"channel": data.get("channel"), "text": data.get("text"), "ts": ts,
+                                       "blocks": data.get("blocks")})
             return self._send(200, {"ok": True, "channel": data.get("channel"), "ts": ts})
+        if path == "/gmail/gmail/v1/users/me/messages/send":
+            data = json.loads(raw)
+            msg = email_lib.message_from_bytes(base64.urlsafe_b64decode(data["raw"] + "=" * (-len(data["raw"]) % 4)))
+            sent = {"id": f"sent_{next(IDS)}", "threadId": data.get("threadId"), "to": msg["To"],
+                    "subject": msg["Subject"], "in_reply_to": msg["In-Reply-To"], "body": msg.get_payload(decode=True).decode()}
+            with LOCK:
+                STATE["sent"].append(sent)
+            return self._send(200, {"id": sent["id"], "threadId": sent["threadId"], "labelIds": ["SENT"]})
+        if m := re.match(r"^/gmail/gmail/v1/users/me/messages/([^/]+)/modify$", path):
+            data = json.loads(raw)
+            with LOCK:
+                labels = set(STATE["labels"].get(m.group(1), []))
+                labels |= set(data.get("addLabelIds", []))
+                labels -= set(data.get("removeLabelIds", []))
+                STATE["labels"][m.group(1)] = sorted(labels)
+            return self._send(200, {"id": m.group(1), "labelIds": sorted(labels)})
         if re.match(r"^/shipmatch/api/[^/]+/documents$", path):
             if b'name="file"' not in raw:
                 return self._send(400, {"detail": "file is required"})

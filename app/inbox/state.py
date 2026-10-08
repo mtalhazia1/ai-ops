@@ -14,7 +14,8 @@ TRANSITIONS: dict[str, set[str]] = {
     Status.AWAITING_APPROVAL: {Status.APPROVED, Status.REJECTED, Status.NEEDS_REVIEW, Status.FAILED},
     Status.NEEDS_REVIEW: {Status.APPROVED, Status.REJECTED, Status.IGNORED, Status.AWAITING_APPROVAL, Status.FAILED},
     Status.APPROVED: {Status.DONE, Status.FAILED},
-    Status.FAILED: {Status.RECEIVED},
+    # Retry: start over, or (when a decision was already made) resume at sending.
+    Status.FAILED: {Status.RECEIVED, Status.APPROVED},
     Status.DONE: set(),
     Status.REJECTED: set(),
     Status.IGNORED: set(),

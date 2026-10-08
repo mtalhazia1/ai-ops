@@ -1,0 +1,688 @@
+{
+  "name": "WF3 Execute",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "email_id",
+              "type": "number"
+            },
+            {
+              "name": "decision",
+              "type": "string"
+            },
+            {
+              "name": "reviewer",
+              "type": "string"
+            },
+            {
+              "name": "channel",
+              "type": "string"
+            },
+            {
+              "name": "final_body",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "4bd04302-16d9-5886-aa15-21382d8d7812",
+      "name": "When called by WF2",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "execute",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "3d34cc12-2996-516b-a2ac-8dbe4f517d76",
+      "name": "Dashboard webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ],
+      "webhookId": "4290bda7-a6d2-5745-b98a-37d143e01bfb"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a3710895-9657-58bd-8ea8-13eb8e212ae2",
+              "leftValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "4ea3c415-72d7-5e34-b8a8-9f3d3163fcfe",
+              "leftValue": "={{ $json.headers['x-webhook-secret'] }}",
+              "rightValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a535a960-398f-5b5c-abbb-5d5c0599bd61",
+      "name": "Secret OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aeaf12b9-8194-51eb-99ef-3b78d28f1677",
+              "name": "email_id",
+              "value": "={{ Number($json.email_id ?? $json.body.email_id) }}",
+              "type": "number"
+            },
+            {
+              "id": "c3c96748-0416-579e-b289-b1307e411399",
+              "name": "decision",
+              "value": "={{ $json.decision ?? $json.body.decision }}",
+              "type": "string"
+            },
+            {
+              "id": "610333a3-da85-5df3-afc7-26305aaa0218",
+              "name": "reviewer",
+              "value": "={{ $json.reviewer ?? $json.body.reviewer ?? '' }}",
+              "type": "string"
+            },
+            {
+              "id": "eb83e67c-3820-57bb-ae01-a85c02e5d353",
+              "name": "channel",
+              "value": "={{ $json.channel ?? $json.body.channel ?? 'dashboard' }}",
+              "type": "string"
+            },
+            {
+              "id": "201e836d-cbd0-5454-b0ef-219df24aee66",
+              "name": "final_body",
+              "value": "={{ $json.final_body ?? $json.body.final_body ?? '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5d4d9d54-c1ca-5cc1-a859-92f3ace8e153",
+      "name": "Decision",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $json.email_id }}/approval",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ decision: $json.decision, reviewer: $json.reviewer, channel: $json.channel }, $json.final_body ? { final_body: $json.final_body } : {})) }}"
+      },
+      "id": "d2429ef0-ab62-5fb6-af60-a0636e49b0b7",
+      "name": "Record decision (Django)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "983d7fda-284d-50cb-9f7e-24117188a7b6",
+              "leftValue": "={{ $json.decision }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "50d2575c-2299-5081-a1f1-b70e601842c2",
+      "name": "Recorded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "e2283d4e-a4ca-5246-a2af-4bdc65c87001",
+      "name": "Already decided otherwise",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a171f131-5bc1-5f8d-b6af-200ab1a81fd2",
+              "leftValue": "={{ $json.decision }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "rejected"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "349cf69d-9498-5aa0-84c7-d30b1b10d883",
+      "name": "Rejected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.GMAIL_API_URL || 'https://gmail.googleapis.com') }}/gmail/v1/users/me/messages/{{ $('Record decision (Django)').item.json.gmail_message_id }}/modify",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ addLabelIds: ($env.GMAIL_LABEL_REJECTED_ID ? [$env.GMAIL_LABEL_REJECTED_ID] : []), removeLabelIds: ($env.GMAIL_LABEL_PROCESSING_ID ? [$env.GMAIL_LABEL_PROCESSING_ID] : []) }) }}"
+      },
+      "id": "7ebcec58-e74b-5647-889d-b629fda19fa5",
+      "name": "Label ai-rejected",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -160
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail ops inbox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Decision').item.json.email_id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'reply_sent', idempotency_key: 'reply_sent:' + $('Decision').item.json.email_id }) }}"
+      },
+      "id": "40308040-62c9-517c-9351-4f193ff32a1d",
+      "name": "Claim reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        60
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "51cd0359-46a7-569b-9d8a-35fd3a857254",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2a2e3cf5-7656-52b0-b1a3-d082b60820e7",
+      "name": "Send now?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "197ac8ef-8b72-568c-a193-0a36d82f2787",
+              "leftValue": "={{ $json.done }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "23ae2f01-614b-55a1-b145-a18abe863d10",
+      "name": "Already sent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.GMAIL_API_URL || 'https://gmail.googleapis.com') }}/gmail/v1/users/me/messages/send",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ raw: $('Record decision (Django)').item.json.raw, threadId: $('Record decision (Django)').item.json.gmail_thread_id }) }}"
+      },
+      "id": "51603c62-4fc6-5a0a-90f2-6e5be8c07c56",
+      "name": "Gmail send reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        40
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail ops inbox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Decision').item.json.email_id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'reply_sent', idempotency_key: 'reply_sent:' + $('Decision').item.json.email_id, request: { to: $('Record decision (Django)').item.json.to, subject: $('Record decision (Django)').item.json.subject, decision: $('Record decision (Django)').item.json.decision }, response: { gmail_id: $json.id, thread_id: $json.threadId }, ok: true }) }}"
+      },
+      "id": "c79d42b1-76ea-5ec6-a928-1f0aabe44e4c",
+      "name": "Log reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        40
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Decision').item.json.email_id }}/status",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'done' }) }}"
+      },
+      "id": "530f533c-00ec-59ac-95ad-90de9d6bf7d4",
+      "name": "Mark done",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.GMAIL_API_URL || 'https://gmail.googleapis.com') }}/gmail/v1/users/me/messages/{{ $('Record decision (Django)').item.json.gmail_message_id }}/modify",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ addLabelIds: ($env.GMAIL_LABEL_PROCESSED_ID ? [$env.GMAIL_LABEL_PROCESSED_ID] : []), removeLabelIds: ($env.GMAIL_LABEL_PROCESSING_ID ? [$env.GMAIL_LABEL_PROCESSING_ID] : []) }) }}"
+      },
+      "id": "f5c82db4-2409-5f89-ad46-4e0fd140dc76",
+      "name": "Label ai-processed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail ops inbox"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When called by WF2": {
+      "main": [
+        [
+          {
+            "node": "Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dashboard webhook": {
+      "main": [
+        [
+          {
+            "node": "Secret OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Secret OK?": {
+      "main": [
+        [
+          {
+            "node": "Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision": {
+      "main": [
+        [
+          {
+            "node": "Record decision (Django)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record decision (Django)": {
+      "main": [
+        [
+          {
+            "node": "Recorded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recorded?": {
+      "main": [
+        [
+          {
+            "node": "Rejected?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already decided otherwise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rejected?": {
+      "main": [
+        [
+          {
+            "node": "Label ai-rejected",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim reply": {
+      "main": [
+        [
+          {
+            "node": "Send now?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send now?": {
+      "main": [
+        [
+          {
+            "node": "Gmail send reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already sent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail send reply": {
+      "main": [
+        [
+          {
+            "node": "Log reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log reply": {
+      "main": [
+        [
+          {
+            "node": "Mark done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark done": {
+      "main": [
+        [
+          {
+            "node": "Label ai-processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already sent?": {
+      "main": [
+        [
+          {
+            "node": "Mark done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "wf4error00000001",
+    "timezone": "Asia/Karachi",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "id": "wf3execute000001",
+  "tags": []
+}

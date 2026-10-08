@@ -4,7 +4,7 @@
 > before coding started. A new chat (or a new developer) should read this file first, then build milestone by
 > milestone (Section 16). If something here conflicts with a later decision, update this file.
 >
-> Written: 2026-10-08. Status: M0 done; M1, M2 and M3 built (see Section 21 for decisions made while building).
+> Written: 2026-10-08. Status: M0 done; M1–M4 built (see Section 21 for decisions made while building).
 
 ---
 
@@ -723,3 +723,10 @@ Times assume about 4–6 focused hours a day. Do not start a milestone until the
 | 2026-10-08 | WF2 calls HubSpot, Slack, ShipMatch and Gmail attachments with HTTP Request nodes using n8n's predefined credentials; base URLs can be overridden by env vars. | Full control of HubSpot associations/pipelines, and the whole flow can run against `dev/mocks` offline. |
 | 2026-10-08 | WF2 has a second trigger: `POST /webhook/process` guarded by the `x-webhook-secret` header. | The dashboard Retry button (M5) and the offline e2e script use it. |
 | 2026-10-08 | Worker health check on port 5680 (5679 is n8n's task-runner broker); `N8N_LISTEN_ADDRESS=0.0.0.0`. | Port clash; hosts without IPv6. |
+| 2026-10-08 | Slack approval uses a Slack message with link buttons to a Wait node's signed resume URL (Section 19 fallback), not the Slack node's send-and-wait. | Same mechanism n8n uses internally, but it can run against the mocks, shows the full approval card, and the Wait node's "ignore bots" stops link previewers approving. A second click gets 409. Reviewer identity from Slack is not available (recorded as `slack`). |
+| 2026-10-08 | Approval timeout is `APPROVAL_TIMEOUT_MINUTES` (default 1440). | Testable without waiting 24 h. |
+| 2026-10-08 | The drafter sees structured data only (category, fields, missing fields, lookups, playbook), not the raw email. Subject (`Re: ...`) and recipient are set in code; the signature is appended in code if missing. | Keeps injected instructions away from the drafter; matches the 8.3 input list. |
+| 2026-10-08 | The reply is built in Django as a raw RFC 5322 message (To from Reply-To/From, `In-Reply-To`/`References` from the stored `Message-ID`) and sent with the Gmail API `messages.send` + `threadId` through an HTTP node. Intake now stores `Message-ID`, `References`, `Reply-To`. | Recipient and threading come from code; testable; mockable. |
+| 2026-10-08 | Gmail labels are set through `messages.modify` with label IDs from env (`GMAIL_LABEL_*_ID`). | The Gmail API needs IDs, not names; no manual node edits after import. |
+| 2026-10-08 | `/draft` and `/approval` set the status themselves (`awaiting_approval`, `approved`/`rejected`); a repeated call returns the saved result. `failed → approved` is allowed when a decision already exists, so a send failure resumes at sending. | Re-runs are safe; a failed send doesn't need a new draft and approval. |
+| 2026-10-08 | Eval runner drafts every auto-routed email and reports "draft checks passed" (flag `--no-drafts`). | Section 14 metric. |

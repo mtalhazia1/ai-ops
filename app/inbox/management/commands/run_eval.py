@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from inbox import evaluation
 from inbox.llm.client import get_llm
+from inbox.llm.draft import DraftInput, PlaybookData, draft_reply
 from inbox.llm.triage import triage
 from inbox.models import EvalRun, Playbook
 
@@ -27,6 +28,7 @@ class Command(BaseCommand):
         parser.add_argument("--tag", action="append", default=[], help="only cases with this tag (repeatable)")
         parser.add_argument("--workers", type=int, default=4)
         parser.add_argument("--no-save", action="store_true", help="print metrics only; write no report")
+        parser.add_argument("--no-drafts", action="store_true", help="skip drafting replies (faster, cheaper)")
 
     def handle(self, *args, **opts):
         dataset = Path(opts["dataset"])
@@ -42,12 +44,26 @@ class Command(BaseCommand):
 
         started = timezone.now()
         llm = get_llm()
-        company_name = Playbook.get().company_name  # read once; worker threads stay off the DB
+        playbook = PlaybookData.from_model(Playbook.get())  # read once; worker threads stay off the DB
+        company_name = playbook.company_name
+        with_drafts = not opts["no_drafts"]
         self.stdout.write(f"Running {len(cases)} emails with {opts['workers']} workers...")
 
         def run(case):
             try:
-                return case.id, triage(case.to_input(), llm, company_name).as_dict()
+                email = case.to_input()
+                result = triage(email, llm, company_name)
+                out = result.as_dict()
+                if with_drafts and result.route == "auto":
+                    d = draft_reply(DraftInput(category=result.category, fields=result.fields,
+                                               missing_fields=result.missing_fields, subject=email.subject,
+                                               from_name=email.from_name, lookups_available=False,
+                                               source_text=f"{email.subject}\n{email.body_clean}\n{email.from_email}"),
+                                    playbook, llm)
+                    out["draft"] = {"ok": d.ok, "problems": d.problems, "body": d.body}
+                    out["cost_usd"] = str(result.cost_usd + d.cost_usd)
+                    out["latency_ms"] = result.latency_ms + d.latency_ms
+                return case.id, out
             except Exception as exc:  # report, don't abort the run
                 return case.id, {"error": f"{type(exc).__name__}: {exc}"}
 

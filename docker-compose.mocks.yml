@@ -7,6 +7,9 @@ x-mock-urls: &mock-urls
   SLACK_API_URL: http://mocks:9000/slack/api
   GMAIL_API_URL: http://mocks:9000/gmail
   SHIPMATCH_URL: http://mocks:9000/shipmatch
+  GMAIL_LABEL_PROCESSING_ID: Label_processing
+  GMAIL_LABEL_PROCESSED_ID: Label_processed
+  GMAIL_LABEL_REJECTED_ID: Label_rejected
 
 services:
   mocks:

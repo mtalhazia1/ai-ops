@@ -140,6 +140,40 @@ def claim_text(email: Email, triage: Triage) -> str:
     return "\n".join(lines)
 
 
+ACTION_LABELS = {
+    "hubspot_contact": "HubSpot contact",
+    "hubspot_deal": "HubSpot deal",
+    "hubspot_task": "HubSpot task",
+    "hubspot_note": "HubSpot note",
+    "shipmatch_upload": "ShipMatch upload",
+    "shipmatch_lookup": "ShipMatch lookup",
+    "slack_alert": "Slack alert",
+}
+
+
+def approval_text(email: Email, triage: Triage, draft) -> str:
+    """The Slack approval message (mrkdwn): what came in, what was done, the draft."""
+    fields = " · ".join(
+        f"{FIELD_LABELS.get(k, k.replace('_', ' ').capitalize())}: {slack_escape(_fmt(v))}" for k, v in _filled(triage.fields)
+    )
+    missing = ", ".join(FIELD_LABELS.get(m, m) for m in triage.missing_fields)
+    done = sorted({ACTION_LABELS.get(a.kind, a.kind) for a in email.actions.filter(ok=True)})
+    quoted = "\n".join("> " + slack_escape(line) if line.strip() else ">" for line in draft.body.splitlines())
+    lines = [
+        f":envelope_with_arrow: *Approval needed* · {triage.category} · {triage.urgency} urgency",
+        f"From: {slack_escape(email.from_name or '')} {slack_escape(email.from_email)}",
+        f"Subject: {slack_escape(email.subject or '(no subject)')}",
+    ]
+    if fields:
+        lines.append(f"Fields: {fields}")
+    if missing:
+        lines.append(f"Missing: {slack_escape(missing)}")
+    lines.append(f"Done so far: {', '.join(done) if done else 'nothing yet'}")
+    lines.append(f"*Draft reply* ({slack_escape(draft.subject)}):")
+    lines.append(quoted)
+    return "\n".join(lines)[:2900]  # Slack section text limit is 3000
+
+
 def payload(email: Email, triage: Triage, *, rerun: bool = False) -> dict[str, Any]:
     """The triage response WF2 works from."""
     first, last = _split_name(email)
@@ -162,7 +196,9 @@ def payload(email: Email, triage: Triage, *, rerun: bool = False) -> dict[str, A
         "injection_flag": triage.injection_flag,
         "route": triage.route,
         "review_reason": triage.review_reason,
+        "needs_review_reason": email.needs_review_reason,
         "dashboard_url": dashboard_url(email),
+        "review_text": review_text(email, triage.review_reason or "manual review"),
         "shipmatch_enabled": settings.SHIPMATCH_ENABLED,
         "crm": {
             "contact": {"email": email.from_email, "firstname": first, "lastname": last},

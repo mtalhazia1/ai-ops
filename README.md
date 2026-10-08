@@ -15,7 +15,8 @@ the portfolio README is written at M6.
 | M1 Intake | Django side done and tested; WF1 exported. Needs a Gmail test account + OAuth in n8n to finish |
 | M2 Triage | Code, prompts, 22 labelled emails and `run_eval` done; needs an `ANTHROPIC_API_KEY` run to check the ≥85% target |
 | M3 Routing and actions | WF2 built and verified end to end against mocks (HubSpot, ShipMatch on/off, Slack, review routing, idempotency under parallel runs). Needs real HubSpot/Slack/ShipMatch credentials for the live check |
-| M4–M6 | Not started |
+| M4 Drafts, approval, sending | Drafting with output checks, playbook editor, Slack approval with timeout, WF3 sending in thread. Verified end to end against mocks (approve, double click, bot click, reject, blocked draft, timeout, send failure and resume). Needs real Gmail/Slack for the live check |
+| M5–M6 | Not started |
 
 ## Quick start
 
@@ -28,6 +29,7 @@ docker compose exec app python manage.py createsuperuser
 | URL | What |
 |---|---|
 | http://localhost:8001/ | Dashboard (log in with the superuser) |
+| http://localhost:8001/playbook/ | Playbook editor (company facts, tone, signature for drafts) |
 | http://localhost:8001/admin/ | Django admin |
 | http://localhost:5678/ | n8n editor |
 
@@ -48,6 +50,8 @@ Every route needs `X-Internal-Token: $INTERNAL_TOKEN`; anything else gets 401.
 | `POST /internal/emails` | Insert-or-ignore on `gmail_message_id` → `{id, created, status}` |
 | `GET /internal/emails/{id}` | Email summary for n8n |
 | `POST /internal/emails/{id}/triage` | Clean → classify → extract → validate → save `Triage` → `{category, urgency, fields, missing_fields, route, review_reason}` |
+| `POST /internal/emails/{id}/draft` | Draft the reply, run the output checks → `awaiting_approval` (or `needs_review` if blocked); repeat returns the saved draft |
+| `POST /internal/emails/{id}/approval` | Record approve/edit/reject → returns the reply as a raw Gmail message; disallowed decisions return 409 |
 | `POST /internal/emails/{id}/status` | State change; disallowed transitions return 409 |
 | `POST /internal/emails/{id}/actions/claim` | Reserve an idempotency key before an outside call → `{proceed, done, response}` |
 | `GET/POST /internal/emails/{id}/actions` | Log outside actions with a unique idempotency key; `?key=` checks whether one was done |
@@ -78,10 +82,11 @@ docker compose exec app python manage.py run_eval --limit 5  # quick check
 docker compose exec app python manage.py run_eval --tag injection
 ```
 
-Runs the production triage code over `app/evals/dataset/*.json` and writes
+Runs the production triage and drafting code over `app/evals/dataset/*.json` and writes
 `app/evals/reports/<timestamp>.json` + `.html` (also listed under **Evaluations** in the dashboard).
 It prints category accuracy, macro F1, field accuracy, invented values, injection catch rate, review rate,
-latency p50/p95, cost per email, a confusion matrix and every failure.
+draft checks passed, latency p50/p95, cost per email, a confusion matrix and every failure. Add
+`--no-drafts` to skip drafting.
 
 Each dataset file holds one email and its hand-checked label (`expected`). Labels are only as good as the
 person who checked them: review every new file by hand.

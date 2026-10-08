@@ -9,9 +9,13 @@
 <header>
   <strong>AI Ops Inbox</strong>
   <a href="{% url 'inbox:email_list' %}">Emails</a>
+  <a href="{% url 'inbox:playbook' %}">Playbook</a>
   <a href="{% url 'inbox:eval_list' %}">Evaluations</a>
   <a href="/admin/">Admin</a>
 </header>
-<main>{% block content %}{% endblock %}</main>
+<main>
+  {% for message in messages %}<p class="flash">{{ message }}</p>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
 </body>
 </html>

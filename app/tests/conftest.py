@@ -35,7 +35,10 @@ def api(db):
 class FakeLLM:
     """Returns canned classification / extraction outputs, keyed by schema kind."""
 
-    def __init__(self, classification=None, fields=None, evidence=None, confidence=None):
+    DEFAULT_DRAFT = "Hi Sarah,\n\nThanks for your request. The team will send the quote shortly.\n\nBest regards,\nOps Team\nIndus Freight"
+
+    def __init__(self, classification=None, fields=None, evidence=None, confidence=None, draft=None):
+        self.draft = draft if draft is not None else self.DEFAULT_DRAFT
         self.classification = classification or {}
         self.fields = fields or {}
         self.evidence = evidence or {}
@@ -44,6 +47,9 @@ class FakeLLM:
 
     def structured(self, *, model, system, user, schema, validator, max_tokens=2048):
         self.calls.append({"model": model, "system": system, "user": user})
+        if "body" in schema["properties"]:
+            return StructuredResult(data=validator.model_validate({"body": self.draft, "asks_for": []}),
+                                    usage=Usage(input_tokens=300, output_tokens=120, calls=1))
         if "category" in schema["properties"]:
             data = {
                 "category": "quote_request",

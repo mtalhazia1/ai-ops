@@ -15,10 +15,11 @@ from ninja import NinjaAPI, Schema
 from ninja.security import APIKeyHeader
 from pydantic import ConfigDict, Field
 
-from . import process, state
+from . import mail, process, state
 from .cleaning import clean_body
+from .llm.draft import DraftInput, PlaybookData, draft_reply, reply_subject
 from .llm.triage import EmailInput, triage
-from .models import Action, Email, Failure, Status, Triage
+from .models import Action, Approval, Draft, Email, Failure, Playbook, Status, Triage
 
 
 class InternalToken(APIKeyHeader):
@@ -65,6 +66,9 @@ class EmailIn(Schema):
     # Raw "Name <address>" header values, as Gmail returns them. n8n sends "from".
     from_: str = Field("", alias="from")
     to: str = ""
+    reply_to: str = ""
+    message_id: str = ""
+    references: str = ""
     subject: str = ""
     date: Optional[str] = None
     text: str = ""
@@ -104,6 +108,9 @@ def create_email(request, payload: EmailIn):
                 from_email=from_email or payload.from_,
                 from_name=from_name,
                 to_email=to_email or payload.to,
+                reply_to=parseaddr(payload.reply_to)[1] if payload.reply_to else "",
+                rfc_message_id=payload.message_id.strip()[:998],
+                references=payload.references.strip(),
                 subject=payload.subject,
                 body_text=payload.text,
                 body_clean=clean_body(payload.text, payload.html),
@@ -182,6 +189,134 @@ def triage_email(request, email_id: int):
     return process.payload(email, triage_row)
 
 
+# --- Draft ------------------------------------------------------------------------
+
+def _lookups(email: Email) -> list[dict[str, Any]]:
+    latest = email.actions.filter(kind="shipmatch_lookup", ok=True).order_by("-created_at", "-id").first()
+    return (latest.response or {}).get("results", []) if latest else []
+
+
+def _draft_out(email: Email, draft: Draft, *, rerun: bool) -> dict[str, Any]:
+    triage_row = email.latest_triage
+    out = {
+        "id": email.id,
+        "status": email.status,
+        "rerun": rerun,
+        "ok": draft.ok,
+        "subject": draft.subject,
+        "body": draft.body,
+        "asks_for": draft.asks_for,
+        "problems": draft.blocked_reason,
+        "dashboard_url": process.dashboard_url(email),
+    }
+    if draft.ok and triage_row:
+        out["approval_text"] = process.approval_text(email, triage_row, draft)
+    if email.status == Status.NEEDS_REVIEW:
+        out["review_text"] = process.review_text(email, email.needs_review_reason or "draft blocked")
+    return out
+
+
+@api.post("/emails/{email_id}/draft")
+def draft_email(request, email_id: int):
+    get_object_or_404(Email, pk=email_id)
+    with transaction.atomic():
+        email = Email.objects.select_for_update().get(pk=email_id)
+        existing = email.latest_draft
+        if email.status in (Status.AWAITING_APPROVAL, Status.APPROVED, Status.DONE) and existing and existing.ok:
+            return _draft_out(email, existing, rerun=True)
+        # Only freshly triaged emails are drafted automatically. Anything in review
+        # stays with the reviewer (the dashboard can re-draft).
+        if email.status != Status.TRIAGED:
+            raise state.InvalidTransition(email.status, Status.AWAITING_APPROVAL)
+        triage_row = email.latest_triage
+        result = draft_reply(
+            DraftInput(
+                category=triage_row.category,
+                fields=triage_row.fields,
+                missing_fields=triage_row.missing_fields,
+                subject=email.subject,
+                from_name=email.from_name,
+                lookups=_lookups(email),
+                lookups_available=settings.SHIPMATCH_ENABLED,
+                source_text="\n".join([email.subject, email.body_text, email.from_email, email.reply_to]),
+            ),
+            PlaybookData.from_model(Playbook.get()),
+        )
+        draft = Draft.objects.create(
+            email=email, subject=result.subject, body=result.body, asks_for=result.asks_for, ok=result.ok,
+            blocked_reason=result.blocked_reason, model=result.model, input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens, cost_usd=result.cost_usd, latency_ms=result.latency_ms,
+        )
+        if result.ok:
+            state.transition(email, Status.AWAITING_APPROVAL)
+        else:
+            state.transition(email, Status.NEEDS_REVIEW, reason=f"draft blocked: {result.blocked_reason}"[:1000])
+    return _draft_out(email, draft, rerun=False)
+
+
+# --- Approval -----------------------------------------------------------------------
+
+class ApprovalIn(Schema):
+    decision: str
+    reviewer: str = ""
+    channel: str = "slack"
+    final_body: Optional[str] = None
+
+
+def _approval_out(email: Email, approval: Approval, *, rerun: bool) -> dict[str, Any]:
+    draft = email.latest_draft
+    subject = draft.subject if draft else reply_subject(email.subject)
+    out = {
+        "id": email.id,
+        "status": email.status,
+        "rerun": rerun,
+        "decision": approval.decision,
+        "reviewer": approval.reviewer,
+        "gmail_message_id": email.gmail_message_id,
+        "gmail_thread_id": email.gmail_thread_id,
+    }
+    if approval.decision != "rejected":
+        msg = mail.build_reply(email, subject, approval.final_body)
+        out.update({"to": msg["To"], "subject": subject, "final_body": approval.final_body, "raw": mail.gmail_raw(msg)})
+    return out
+
+
+@api.post("/emails/{email_id}/approval")
+def record_approval(request, email_id: int, payload: ApprovalIn):
+    """Record a human decision. Repeating the same decision returns it again
+    (`rerun: true`) so WF3 can finish after a crash; anything else is 409."""
+    if payload.decision not in ("approved", "edited", "rejected"):
+        return api.create_response(request, {"detail": "decision must be approved, edited or rejected"}, status=422)
+    if payload.channel not in ("slack", "dashboard"):
+        return api.create_response(request, {"detail": "channel must be slack or dashboard"}, status=422)
+    get_object_or_404(Email, pk=email_id)
+    with transaction.atomic():
+        email = Email.objects.select_for_update().get(pk=email_id)
+        latest = email.approvals.order_by("-decided_at", "-id").first()
+        rejecting = payload.decision == "rejected"
+        if email.status in (Status.AWAITING_APPROVAL, Status.NEEDS_REVIEW):
+            decision, body = payload.decision, ""
+            if not rejecting:
+                draft = email.latest_draft
+                draft_body = draft.body if draft and draft.ok else ""
+                body = (payload.final_body or "").strip() or draft_body
+                if not body:
+                    return api.create_response(request, {"detail": "no approved draft or final_body to send"}, status=422)
+                decision = "edited" if body != draft_body else "approved"
+            approval = Approval.objects.create(email=email, channel=payload.channel, reviewer=payload.reviewer[:255],
+                                               decision=decision, final_body=body)
+            state.transition(email, Status.REJECTED if rejecting else Status.APPROVED)
+            return _approval_out(email, approval, rerun=False)
+        same = latest and (latest.decision == "rejected") == rejecting
+        if same and email.status in (Status.APPROVED, Status.DONE, Status.REJECTED):
+            return _approval_out(email, latest, rerun=True)
+        if same and not rejecting and email.status == Status.FAILED:
+            # Sending failed after the decision: Retry resumes at sending, no new approval.
+            state.transition(email, Status.APPROVED)
+            return _approval_out(email, latest, rerun=True)
+        raise state.InvalidTransition(email.status, Status.REJECTED if rejecting else Status.APPROVED)
+
+
 # --- Status -------------------------------------------------------------------------
 
 class StatusIn(Schema):
@@ -195,7 +330,10 @@ def set_status(request, email_id: int, payload: StatusIn):
     if email.status == Status.FAILED and payload.status == Status.RECEIVED:  # Retry
         release_pending_claims(email)
     state.transition(email, payload.status, reason=payload.reason)
-    return {"id": email.id, "status": email.status}
+    out = {"id": email.id, "status": email.status}
+    if email.status == Status.NEEDS_REVIEW:
+        out["review_text"] = process.review_text(email, email.needs_review_reason or "manual review")
+    return out
 
 
 # --- Actions (idempotency log) ------------------------------------------------------
