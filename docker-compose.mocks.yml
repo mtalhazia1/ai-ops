@@ -1,0 +1,32 @@
+# Development only: run the whole flow offline against dev/mocks/mock_services.py.
+#   docker compose -f docker-compose.yml -f docker-compose.mocks.yml up -d
+# The mock "LLM" is rule-based; use the real API for accuracy (run_eval).
+
+x-mock-urls: &mock-urls
+  HUBSPOT_API_URL: http://mocks:9000/hubspot
+  SLACK_API_URL: http://mocks:9000/slack/api
+  GMAIL_API_URL: http://mocks:9000/gmail
+  SHIPMATCH_URL: http://mocks:9000/shipmatch
+
+services:
+  mocks:
+    image: python:3.12-slim
+    command: ["python", "-u", "/mocks/mock_services.py"]
+    volumes:
+      - ./dev/mocks:/mocks:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  n8n:
+    environment: *mock-urls
+  n8n-worker:
+    environment: *mock-urls
+
+  app:
+    environment:
+      ANTHROPIC_BASE_URL: http://mocks:9000/anthropic
+      ANTHROPIC_API_KEY: mock
+      SHIPMATCH_URL: http://mocks:9000/shipmatch

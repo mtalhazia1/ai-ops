@@ -163,7 +163,7 @@
       "parameters": {
         "workflowId": {
           "__rl": true,
-          "value": "REPLACE_WITH_WF2_ID",
+          "value": "wf2process000001",
           "mode": "id"
         },
         "workflowInputs": {
@@ -291,7 +291,7 @@
     "executionOrder": "v1",
     "saveDataErrorExecution": "all",
     "saveDataSuccessExecution": "all",
-    "errorWorkflow": "REPLACE_WITH_WF4_ID",
+    "errorWorkflow": "wf4error00000001",
     "timezone": "Asia/Karachi"
   },
   "pinData": {},

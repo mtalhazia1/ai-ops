@@ -1,0 +1,2141 @@
+{
+  "name": "WF2 Process",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "email_id",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "id": "b2f0fca0-4c53-5c93-b166-6a0f09de36ce",
+      "name": "When called by WF1",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "f268b66c-82bd-56d0-9a6e-0a6990663e3a",
+      "name": "Retry webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ],
+      "webhookId": "11301ff1-0930-5b9e-9f38-56e5b49e7d2b"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a26ce705-568e-51b0-b69d-ec97c7db657a",
+              "leftValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "d0c5cd36-bc51-5633-bc75-506b6c9ec091",
+              "leftValue": "={{ $json.headers['x-webhook-secret'] }}",
+              "rightValue": "={{ $env.N8N_WEBHOOK_SECRET }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a535a960-398f-5b5c-abbb-5d5c0599bd61",
+      "name": "Secret OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e3f5891f-92cf-59ab-9be4-4141780d50c0",
+              "name": "email_id",
+              "value": "={{ Number($json.email_id ?? $json.body.email_id) }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3a37959d-9a63-5e70-a9a2-367ba3397e80",
+      "name": "Email ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $json.email_id }}/triage",
+        "options": {
+          "timeout": 120000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "e603a4c2-7077-59e7-b24e-f184e3b62551",
+      "name": "Triage (Django)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6e326dec-2e5c-5286-a6f4-05d3bfb3ff1e",
+              "leftValue": "={{ $('Triage (Django)').item.json.route }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "review"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "341257fc-573a-5efb-8cef-a46400c3f4c9",
+      "name": "Needs review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':review' }) }}"
+      },
+      "id": "d1b59ecc-1979-5715-b849-85edd855967f",
+      "name": "Claim review alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -400
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6383158a-35b0-5f2e-a574-f69d87db4337",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "90f8f187-ab6a-502c-8764-d62a602caa4c",
+      "name": "Send review alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.SLACK_API_URL || 'https://slack.com/api') }}/chat.postMessage",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $env.SLACK_CHANNEL_REVIEW || '#ops-review', text: ($('Triage (Django)').item.json.route === 'review' ? $('Triage (Django)').item.json.slack.review_text : $('Triage (Django)').item.json.slack.paperwork_review_text), unfurl_links: false, unfurl_media: false }) }}"
+      },
+      "id": "0805307c-4916-571c-a8fb-08fe74672874",
+      "name": "Slack #ops-review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -400
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3665ac45-197a-5c2b-8164-1b02eef244eb",
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "19119025-6fc0-58b0-b84d-12d934c42eb0",
+      "name": "Slack #ops-review ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Slack error: {{ $json.error }}"
+      },
+      "id": "63cb4d3b-d84b-57af-887d-1b3d340d1ba3",
+      "name": "Slack #ops-review failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':review', request: {}, response: { channel: $json.channel, ts: $json.ts }, ok: true }) }}"
+      },
+      "id": "0d39bdbf-e7c9-5044-afb6-8e5370ee0a2f",
+      "name": "Log review alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        -420
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "28876c4c-10be-5c95-8b2c-f8fe4807b69c",
+                    "leftValue": "={{ $('Triage (Django)').item.json.category }}",
+                    "rightValue": "quote_request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "quote_request"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "25dac49a-8188-5361-b793-62e47a433b3a",
+                    "leftValue": "={{ $('Triage (Django)').item.json.category }}",
+                    "rightValue": "booking",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "booking"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e29dfd4a-97ad-5be5-a21f-a9a51df3988a",
+                    "leftValue": "={{ $('Triage (Django)').item.json.category }}",
+                    "rightValue": "shipment_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "shipment_status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "20f023db-f4c4-53a2-9e62-51c67ef137c5",
+                    "leftValue": "={{ $('Triage (Django)').item.json.category }}",
+                    "rightValue": "paperwork",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "paperwork"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "97785048-a1b6-5b9d-8794-47071d4117e6",
+                    "leftValue": "={{ $('Triage (Django)').item.json.category }}",
+                    "rightValue": "claim",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "claim"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9304f9ae-b2e2-5317-86cf-0d816bb6565b",
+      "name": "Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.HUBSPOT_API_URL || 'https://api.hubapi.com') }}/crm/v3/objects/contacts/batch/upsert",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ inputs: [{ idProperty: 'email', id: $('Triage (Django)').item.json.crm.contact.email, properties: Object.fromEntries(Object.entries($('Triage (Django)').item.json.crm.contact).filter(([k, v]) => v)) }] }) }}"
+      },
+      "id": "88fb1e8d-b302-5fcc-8fa2-e507f40e5cd3",
+      "name": "HubSpot upsert contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "",
+          "name": "HubSpot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'hubspot_contact', idempotency_key: 'hubspot_contact:' + $('Triage (Django)').item.json.id, request: {}, response: { id: $json.results[0].id, new: $json.results[0].new }, ok: true }) }}"
+      },
+      "id": "08e25976-2eb0-541d-9f30-d03aa184a7e0",
+      "name": "Log contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "35df10f6-7996-5537-9694-d0bcdf2e2a2a",
+              "leftValue": "={{ $('Triage (Django)').item.json.category }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "quote_request"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "52901ed1-64cb-5147-ab4f-b32355ef5496",
+      "name": "Quote?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'hubspot_deal', idempotency_key: 'hubspot_deal:' + $('Triage (Django)').item.json.id }) }}"
+      },
+      "id": "fc862073-38af-5884-8088-924bf7535f04",
+      "name": "Claim deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9a6dee6b-8c19-5f7a-b9d4-faba138d9f1d",
+              "leftValue": "={{ $json.done }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8a6c5c89-4c6c-55ab-920b-a659cf66785a",
+      "name": "Deal done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.HUBSPOT_API_URL || 'https://api.hubapi.com') }}/crm/v3/objects/deals",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { dealname: $('Triage (Django)').item.json.crm.deal_name, pipeline: $env.HUBSPOT_QUOTES_PIPELINE_ID || 'default', dealstage: ($('Triage (Django)').item.json.crm.deal_stage === 'info_requested' ? ($env.HUBSPOT_STAGE_INFO_REQUESTED || 'appointmentscheduled') : ($env.HUBSPOT_STAGE_NEW_REQUEST || 'appointmentscheduled')) }, associations: [{ to: { id: $('Log contact').item.json.response.id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 3 }] }] }) }}"
+      },
+      "id": "0c73e18e-8cc9-511a-aadc-7248e2ac7e63",
+      "name": "HubSpot create deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "",
+          "name": "HubSpot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'hubspot_deal', idempotency_key: 'hubspot_deal:' + $('Triage (Django)').item.json.id, request: {}, response: { id: $json.id, name: $json.properties.dealname, stage: $json.properties.dealstage }, ok: true }) }}"
+      },
+      "id": "4ed23364-77c5-5189-8347-65c24ecd7c00",
+      "name": "Log deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6bb7f83b-bf02-5a52-90e6-fe1a576228e2",
+              "name": "deal_id",
+              "value": "={{ $json.response.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "864e9816-c0d4-50aa-ba4e-4867d1108610",
+      "name": "Deal ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a7932e5f-277b-596f-b134-79549aefac3c",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cc0459b8-8766-50f3-9e3d-59aa917038f0",
+      "name": "Create deal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'hubspot_note', idempotency_key: 'hubspot_note:' + $('Triage (Django)').item.json.id }) }}"
+      },
+      "id": "88d6a765-793e-5960-815d-2b12847700a3",
+      "name": "Claim note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "706b9c71-56d3-5968-ae4c-c6c15decf0ef",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fac98032-06b9-51ff-a6ca-9ae36550907a",
+      "name": "Add note?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.HUBSPOT_API_URL || 'https://api.hubapi.com') }}/crm/v3/objects/notes",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { hs_timestamp: $now.toISO(), hs_note_body: $('Triage (Django)').item.json.crm.note_body }, associations: [{ to: { id: $('Deal ID').item.json.deal_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 214 }] }, { to: { id: $('Log contact').item.json.response.id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }] }] }) }}"
+      },
+      "id": "f7633312-048c-5a48-be88-76d3eb902c0a",
+      "name": "HubSpot add note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "",
+          "name": "HubSpot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'hubspot_note', idempotency_key: 'hubspot_note:' + $('Triage (Django)').item.json.id, request: {}, response: { id: $json.id }, ok: true }) }}"
+      },
+      "id": "01123ee5-2651-54c4-a343-fba04e804edf",
+      "name": "Log note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3740,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'hubspot_task', idempotency_key: 'hubspot_task:' + $('Triage (Django)').item.json.id }) }}"
+      },
+      "id": "610eedac-562a-52d5-ace6-1dfc3a4c38d7",
+      "name": "Claim task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f2731275-ce96-5eec-ad7d-c48ac7f8b5cc",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "601b41c4-49a4-5ac3-8e20-52b599b3684c",
+      "name": "Create task?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.HUBSPOT_API_URL || 'https://api.hubapi.com') }}/crm/v3/objects/tasks",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: Object.assign({ hs_timestamp: $now.toISO(), hs_task_subject: $('Triage (Django)').item.json.crm.task_subject, hs_task_body: $('Triage (Django)').item.json.crm.task_body, hs_task_status: 'NOT_STARTED', hs_task_priority: $('Triage (Django)').item.json.crm.task_priority }, $env.HUBSPOT_OPS_OWNER_ID ? { hubspot_owner_id: $env.HUBSPOT_OPS_OWNER_ID } : {}), associations: [{ to: { id: $('Log contact').item.json.response.id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 204 }] }] }) }}"
+      },
+      "id": "10d47cea-cb14-5ced-9dcb-e42401027b5d",
+      "name": "HubSpot create task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "",
+          "name": "HubSpot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'hubspot_task', idempotency_key: 'hubspot_task:' + $('Triage (Django)').item.json.id, request: {}, response: { id: $json.id, subject: $json.properties.hs_task_subject }, ok: true }) }}"
+      },
+      "id": "e104828f-5fc3-5577-a0fb-86ead253b428",
+      "name": "Log task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b9f67f2a-6f96-5bf4-8349-7fdaff160ae6",
+              "leftValue": "={{ $('Triage (Django)').item.json.shipmatch_enabled && $('Triage (Django)').item.json.lookup_refs.length > 0 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d6ba2ec9-462c-5162-9aae-62355ca77c55",
+      "name": "Look up in ShipMatch?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Triage (Django)').item.json.lookup_refs.map(r => ({ json: r }));"
+      },
+      "id": "9cda6279-21ac-5235-b6a1-a2376999c6e7",
+      "name": "One item per reference",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SHIPMATCH_URL }}/api/{{ $env.SHIPMATCH_ORG }}/shipments?q={{ encodeURIComponent($json.ref) }}&limit=5",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "a599c076-e0e8-5053-9591-1c1873f4a858",
+      "name": "ShipMatch search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        460
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "ShipMatch API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One entry per reference: the matching shipments (id, reference, status) or \"not found\".\nconst refs = $('One item per reference').all().map(i => i.json);\nconst results = $input.all().map((item, i) => {\n  let parsed;\n  try { parsed = JSON.parse(item.json.body || '[]'); } catch (e) { parsed = []; }\n  const list = Array.isArray(parsed) ? parsed : (parsed.results || parsed.items || parsed.shipments || []);\n  const matches = list.slice(0, 5).map(s => ({\n    id: s.id, reference: s.reference || s.name || null, status: s.status || null, eta: s.eta || null,\n  }));\n  return { ...refs[i], found: matches.length > 0, matches };\n});\nreturn [{ json: { results } }];"
+      },
+      "id": "c9a5b537-d1f2-5b25-b029-29e21007a965",
+      "name": "Summarize lookups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'shipmatch_lookup', idempotency_key: 'shipmatch_lookup:' + $('Triage (Django)').item.json.id + ':' + $execution.id, request: { refs: $('Triage (Django)').item.json.lookup_refs }, response: { results: $json.results }, ok: true }) }}"
+      },
+      "id": "89d2dce2-4a49-51f1-8f8a-81354b29a893",
+      "name": "Log lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        460
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "369396d3-99a1-5748-adc9-c50c43316461",
+      "name": "No lookup (ShipMatch off or no refs)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0a650c26-3b54-5790-88a2-e9b4f3e061b0",
+              "leftValue": "={{ $('Triage (Django)').item.json.shipmatch_enabled && $('Triage (Django)').item.json.upload_attachments.length > 0 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9934db3d-5abc-5738-8926-e95c28e4e494",
+      "name": "Upload to ShipMatch?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $('Triage (Django)').item.json.upload_attachments.map(a => ({ json: a }));"
+      },
+      "id": "a0b02d1e-3b2f-5bdd-9cf5-6ac3fdfbe5c5",
+      "name": "One item per attachment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'shipmatch_upload', idempotency_key: 'shipmatch_upload:' + $('Triage (Django)').item.json.id + ':' + $('One item per attachment').item.json.gmail_attachment_id }) }}"
+      },
+      "id": "556c1063-f1e3-5a63-9a02-d3b49cf8787f",
+      "name": "Claim upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        780
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "180710c8-4729-5975-b92f-5de474e15e7b",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "eff4dd76-d073-5ff2-b375-26f6cc497e06",
+      "name": "Upload?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.GMAIL_API_URL || 'https://gmail.googleapis.com') }}/gmail/v1/users/me/messages/{{ $('Triage (Django)').item.json.gmail_message_id }}/attachments/{{ $('One item per attachment').item.json.gmail_attachment_id }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2"
+      },
+      "id": "ffab55ae-dcf4-5636-b14b-c0b8282d4e34",
+      "name": "Gmail get attachment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        760
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail ops inbox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gmail returns base64url; Convert to File expects standard base64.\nreturn $input.all().map((item, i) => {\n  const att = $('One item per attachment').itemMatching(i).json;\n  return { json: { data: item.json.data.replace(/-/g, '+').replace(/_/g, '/'), filename: att.filename, mime: att.mime } };\n});"
+      },
+      "id": "5056fa52-5dfd-5c70-b9c8-289b425681cb",
+      "name": "Base64url to base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "data",
+        "options": {
+          "fileName": "={{ $json.filename }}",
+          "mimeType": "={{ $json.mime }}"
+        }
+      },
+      "id": "f2a1eea4-be21-539d-8a2e-1f7a7c5466eb",
+      "name": "To file",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SHIPMATCH_URL }}/api/{{ $env.SHIPMATCH_ORG }}/documents",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        }
+      },
+      "id": "a4de5686-e058-540e-9cff-a27039d1ed86",
+      "name": "ShipMatch upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        760
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "ShipMatch API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'shipmatch_upload', idempotency_key: 'shipmatch_upload:' + $('Triage (Django)').item.json.id + ':' + $('One item per attachment').item.json.gmail_attachment_id, request: { filename: $('One item per attachment').item.json.filename }, response: { status: $json.statusCode, document_id: ($json.body && $json.body.id) || null, detail: ($json.body && ($json.body.detail || $json.body.status)) || null }, ok: [200, 201].includes($json.statusCode) }) }}"
+      },
+      "id": "701abeb1-98f4-583a-a8b5-c68a433a9698",
+      "name": "Log upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        760
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/status",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'needs_review', reason: 'Paperwork: ShipMatch is off or there is no uploadable attachment' }) }}"
+      },
+      "id": "f4131de3-0697-56af-b554-dbc20f6e0665",
+      "name": "Paperwork to review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        940
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions/claim",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':claim' }) }}"
+      },
+      "id": "0004aa8c-b22b-5c48-a071-0a926a2b2131",
+      "name": "Claim urgent alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        1140
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b8703c5c-90c9-51b9-90e4-0814f15c8444",
+              "leftValue": "={{ $json.proceed }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d64c56d4-7163-56bc-8e0c-68a0ceab439a",
+      "name": "Send urgent alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        1140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.SLACK_API_URL || 'https://slack.com/api') }}/chat.postMessage",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $env.SLACK_CHANNEL_URGENT || '#ops-urgent', text: $('Triage (Django)').item.json.slack.claim_text, unfurl_links: false, unfurl_media: false }) }}"
+      },
+      "id": "65909a04-aedb-592f-84b4-3d330fbd18d9",
+      "name": "Slack #ops-urgent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        1140
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c7cb6b09-0de0-5185-a871-f1b0a0f772d6",
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fef8da4b-884b-5ada-b245-c4197221c098",
+      "name": "Slack #ops-urgent ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        1140
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Slack error: {{ $json.error }}"
+      },
+      "id": "33aa3800-8e35-541d-b474-cd071d1c4215",
+      "name": "Slack #ops-urgent failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        1260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_URL }}/internal/emails/{{ $('Triage (Django)').item.json.id }}/actions",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Token",
+              "value": "={{ $env.INTERNAL_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':claim', request: {}, response: { channel: $json.channel, ts: $json.ts }, ok: true }) }}"
+      },
+      "id": "0a5fef9c-0a7e-5e67-a608-909cff742540",
+      "name": "Log claim alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        1120
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "When called by WF1": {
+      "main": [
+        [
+          {
+            "node": "Email ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry webhook": {
+      "main": [
+        [
+          {
+            "node": "Secret OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Secret OK?": {
+      "main": [
+        [
+          {
+            "node": "Email ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email ID": {
+      "main": [
+        [
+          {
+            "node": "Triage (Django)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Triage (Django)": {
+      "main": [
+        [
+          {
+            "node": "Needs review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack #ops-review": {
+      "main": [
+        [
+          {
+            "node": "Slack #ops-review ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack #ops-review ok?": {
+      "main": [
+        [
+          {
+            "node": "Log review alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack #ops-review failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs review?": {
+      "main": [
+        [
+          {
+            "node": "Claim review alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Category",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim review alert": {
+      "main": [
+        [
+          {
+            "node": "Send review alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send review alert?": {
+      "main": [
+        [
+          {
+            "node": "Slack #ops-review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Category": {
+      "main": [
+        [
+          {
+            "node": "HubSpot upsert contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot upsert contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Look up in ShipMatch?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload to ShipMatch?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim urgent alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot upsert contact": {
+      "main": [
+        [
+          {
+            "node": "Log contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log contact": {
+      "main": [
+        [
+          {
+            "node": "Quote?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote?": {
+      "main": [
+        [
+          {
+            "node": "Claim deal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim deal": {
+      "main": [
+        [
+          {
+            "node": "Deal done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deal done?": {
+      "main": [
+        [
+          {
+            "node": "Deal ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create deal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create deal?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot create deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot create deal": {
+      "main": [
+        [
+          {
+            "node": "Log deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log deal": {
+      "main": [
+        [
+          {
+            "node": "Deal ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deal ID": {
+      "main": [
+        [
+          {
+            "node": "Claim note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim note": {
+      "main": [
+        [
+          {
+            "node": "Add note?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add note?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot add note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot add note": {
+      "main": [
+        [
+          {
+            "node": "Log note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim task": {
+      "main": [
+        [
+          {
+            "node": "Create task?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create task?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot create task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot create task": {
+      "main": [
+        [
+          {
+            "node": "Log task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Look up in ShipMatch?": {
+      "main": [
+        [
+          {
+            "node": "One item per reference",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No lookup (ShipMatch off or no refs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per reference": {
+      "main": [
+        [
+          {
+            "node": "ShipMatch search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ShipMatch search": {
+      "main": [
+        [
+          {
+            "node": "Summarize lookups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize lookups": {
+      "main": [
+        [
+          {
+            "node": "Log lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to ShipMatch?": {
+      "main": [
+        [
+          {
+            "node": "One item per attachment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Paperwork to review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Paperwork to review": {
+      "main": [
+        [
+          {
+            "node": "Claim review alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per attachment": {
+      "main": [
+        [
+          {
+            "node": "Claim upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim upload": {
+      "main": [
+        [
+          {
+            "node": "Upload?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload?": {
+      "main": [
+        [
+          {
+            "node": "Gmail get attachment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail get attachment": {
+      "main": [
+        [
+          {
+            "node": "Base64url to base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base64url to base64": {
+      "main": [
+        [
+          {
+            "node": "To file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "To file": {
+      "main": [
+        [
+          {
+            "node": "ShipMatch upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ShipMatch upload": {
+      "main": [
+        [
+          {
+            "node": "Log upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack #ops-urgent": {
+      "main": [
+        [
+          {
+            "node": "Slack #ops-urgent ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack #ops-urgent ok?": {
+      "main": [
+        [
+          {
+            "node": "Log claim alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack #ops-urgent failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim urgent alert": {
+      "main": [
+        [
+          {
+            "node": "Send urgent alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send urgent alert?": {
+      "main": [
+        [
+          {
+            "node": "Slack #ops-urgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": "wf4error00000001",
+    "timezone": "Asia/Karachi",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "active": false,
+  "id": "wf2process000001",
+  "tags": []
+}

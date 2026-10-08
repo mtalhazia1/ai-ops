@@ -5,7 +5,7 @@ Exported workflow JSON lives in `workflows/`. Credentials are referenced by name
 | File | Workflow | Status |
 |---|---|---|
 | `01_intake.json` | WF1 Intake: Gmail → Django `/internal/emails` → label → start WF2 | Built (M1) |
-| `02_process.json` | WF2 Process: triage → route → HubSpot / ShipMatch / Slack → draft → approval | M3–M4 |
+| `02_process.json` | WF2 Process: triage → route → HubSpot / ShipMatch / Slack (drafting + approval added in M4) | Built (M3) |
 | `03_execute.json` | WF3 Execute: approval → reply in thread → labels | M4 |
 | `04_error.json` | WF4 Error handler | M5 |
 | `05_digest.json` | WF5 Daily digest | M5 |
@@ -16,17 +16,25 @@ The compose file mounts this folder read-only at `/workflows` in the n8n contain
 
 ```bash
 docker compose exec n8n n8n import:workflow --input=/workflows/01_intake.json
+docker compose exec n8n n8n import:workflow --input=/workflows/02_process.json
+docker compose exec n8n n8n publish:workflow --id=wf2process000001   # activates WF2's retry webhook
+docker compose restart n8n n8n-worker                                 # CLI publish takes effect on restart
 ```
 
-Or use the editor: **Workflows → Import from file**.
+Or use the editor: **Workflows → Import from file**. Workflow IDs are fixed (`wf1intake0000001`,
+`wf2process000001`, WF4 will be `wf4error00000001`), so WF1 already points at WF2 after import.
 
 ## Credentials to create in n8n
 
 | Name (exact) | Type | Used by |
 |---|---|---|
-| `Gmail ops inbox` | Gmail OAuth2 | WF1 trigger, "Get full message", labels, WF3 reply |
-| `Slack` | Slack OAuth2 / bot token | WF2, WF4, WF5 (later) |
-| `HubSpot` | HubSpot App Token (private app) | WF2 (later) |
+| `Gmail ops inbox` | Gmail OAuth2 | WF1 trigger, "Get full message", labels; WF2 attachment download; WF3 reply |
+| `Slack` | Slack API (bot token `xoxb-...`, scope `chat:write`) | WF2 review/claim alerts; WF4, WF5 later |
+| `HubSpot` | HubSpot App Token (private app) | WF2 contacts, deals, notes, tasks |
+| `ShipMatch API` | Header Auth: name `Authorization`, value `Bearer sm_...` | WF2 lookups and uploads |
+
+After importing, open each HTTP/Gmail node that shows a credential warning and pick the credential
+(n8n links credentials by ID, and IDs differ per install).
 
 Gmail OAuth: create an OAuth client (type *Web application*) in a Google Cloud project, add the n8n
 redirect URL shown in the credential dialog, and enable the Gmail API. Scopes needed: read, modify
@@ -49,7 +57,12 @@ Set in `docker-compose.yml` from `.env` (`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` so
 | `APP_URL` | Django inside the Docker network (`http://app:8001`) |
 | `INTERNAL_TOKEN` | Sent as `X-Internal-Token` on every call to `/internal/` |
 | `DASHBOARD_BASE_URL` | Links to the dashboard in Slack messages |
-| `SHIPMATCH_*` | ShipMatch integration (M3) |
+| `N8N_WEBHOOK_SECRET` | Must match the `x-webhook-secret` header on `POST /webhook/process` (WF2 Retry) |
+| `SHIPMATCH_URL`, `SHIPMATCH_ORG` | ShipMatch API (Django's `SHIPMATCH_ENABLED` decides whether WF2 uses it) |
+| `HUBSPOT_QUOTES_PIPELINE_ID`, `HUBSPOT_STAGE_NEW_REQUEST`, `HUBSPOT_STAGE_INFO_REQUESTED` | Deal pipeline and stages ("Quotes": New request / Info requested) |
+| `HUBSPOT_OPS_OWNER_ID` | Owner of booking tasks (optional) |
+| `SLACK_CHANNEL_REVIEW`, `SLACK_CHANNEL_URGENT`, ... | Channel names; invite the bot to each |
+| `HUBSPOT_API_URL`, `SLACK_API_URL`, `GMAIL_API_URL` | API base URLs; leave unset in production (only the mocks override them) |
 
 ## How WF1 prevents duplicates
 
@@ -60,3 +73,50 @@ Set in `docker-compose.yml` from `.env` (`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` so
 The message is fetched with the Gmail API (`format=full`) through the Gmail credential, and the
 **Build payload** Code node extracts headers, the text/HTML bodies and attachment metadata (attachments
 are not downloaded at intake).
+
+## WF2 Process
+
+```
+WF1 / Retry webhook ─► Email ID ─► Triage (Django) ─► Needs review? ── yes ─► claim ─► Slack #ops-review
+                                                            │ no
+                                                            ▼
+                                                        Category
+   quote_request ─┬► HubSpot upsert contact ─► Quote? ─ yes ─► claim deal ─► create deal ─► claim note ─► add note
+   booking ───────┘                                    └ no ─► claim task ─► create task
+   shipment_status ─► ShipMatch on and refs? ─► one item per ref ─► ShipMatch search ─► summarize ─► log lookup
+   paperwork ─► ShipMatch on and attachments? ─ yes ─► per attachment: claim ─► Gmail get attachment ─► file ─► ShipMatch upload ─► log
+                                              └ no ─► status needs_review ─► Slack #ops-review
+   claim ─► claim alert ─► Slack #ops-urgent
+```
+
+- **Triage** is one HTTP call: Django cleans, classifies, extracts and validates, and returns everything
+  the branches need (`crm.*`, `slack.*`, `lookup_refs`, `upload_attachments`, `shipmatch_enabled`).
+  The same call on an email already triaged returns the saved result (`rerun: true`) without another LLM call.
+- **Exactly once**: before every outside create, `POST /internal/emails/{id}/actions/claim` reserves the
+  idempotency key. Only the run that gets `proceed: true` makes the call, then logs it with
+  `POST /internal/emails/{id}/actions`. A deal that already exists is reused for the note. The HubSpot
+  contact is a batch *upsert* keyed on email, so it can't duplicate.
+- **Identity values come from code**: the contact's email and name come from the Gmail header; the
+  LLM's extracted fields only go into the deal name and note text.
+- **Retries**: every external HTTP node retries twice with a 5 s wait. Slack replies `200 {ok:false}` on
+  errors, so an IF checks `ok` and a *Stop and Error* node fails the run (WF4 then records it and frees the
+  claims). ShipMatch uploads never throw: the status code is logged (`ok=false` for 400/402).
+- **Retry webhook**: `POST /webhook/process` with header `x-webhook-secret: $N8N_WEBHOOK_SECRET` and body
+  `{"email_id": 123}`. The dashboard's Retry button (M5) will call it after `failed → received`.
+- ShipMatch off (`SHIPMATCH_ENABLED=false` in `.env`): status emails skip the lookup; paperwork emails go to
+  `needs_review` with a Slack review message.
+
+## Running offline with mocks
+
+`docker-compose.mocks.yml` adds a `mocks` service (`dev/mocks/mock_services.py`) that stands in for
+HubSpot, Slack, ShipMatch, Gmail attachments and the Anthropic API (a few regexes, not a real model).
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mocks.yml up -d
+docker compose cp dev/mocks/n8n-credentials.json n8n:/tmp/creds.json
+docker compose exec n8n n8n import:credentials --input=/tmp/creds.json   # fake tokens only
+# import + publish WF2 as above, restart n8n, then:
+python dev/e2e_wf2.py --runs 3
+```
+
+Never import the mock credentials into a real deployment.

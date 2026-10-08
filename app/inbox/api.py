@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hmac
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any, Optional
 
@@ -15,7 +15,7 @@ from ninja import NinjaAPI, Schema
 from ninja.security import APIKeyHeader
 from pydantic import ConfigDict, Field
 
-from . import state
+from . import process, state
 from .cleaning import clean_body
 from .llm.triage import EmailInput, triage
 from .models import Action, Email, Failure, Status, Triage
@@ -119,82 +119,67 @@ def create_email(request, payload: EmailIn):
 @api.get("/emails/{email_id}")
 def get_email(request, email_id: int):
     email = get_object_or_404(Email, pk=email_id)
-    t = email.latest_triage
-    return {
-        "id": email.id,
-        "status": email.status,
-        "gmail_message_id": email.gmail_message_id,
-        "gmail_thread_id": email.gmail_thread_id,
-        "from_email": email.from_email,
-        "from_name": email.from_name,
-        "subject": email.subject,
-        "category": email.category,
-        "urgency": email.urgency,
-        "attachments": email.attachments,
-        "needs_review_reason": email.needs_review_reason,
-        "fields": t.fields if t else {},
-        "missing_fields": t.missing_fields if t else [],
-        "dashboard_url": f"{settings.DASHBOARD_BASE_URL.rstrip('/')}/emails/{email.id}/",
-    }
+    triage_row = email.latest_triage
+    if triage_row is None:
+        return {"id": email.id, "status": email.status, "gmail_message_id": email.gmail_message_id,
+                "gmail_thread_id": email.gmail_thread_id, "from_email": email.from_email, "subject": email.subject,
+                "dashboard_url": process.dashboard_url(email)}
+    return process.payload(email, triage_row)
 
 
 # --- Triage -------------------------------------------------------------------------
 
 @api.post("/emails/{email_id}/triage")
 def triage_email(request, email_id: int):
-    email = get_object_or_404(Email, pk=email_id)
-    if not state.can_transition(email.status, Status.TRIAGED):
-        raise state.InvalidTransition(email.status, Status.TRIAGED)
+    get_object_or_404(Email, pk=email_id)
+    # The row lock is held for the whole triage, so a parallel WF2 run for the same
+    # email waits here and then takes the "re-run" path instead of paying for a
+    # second LLM call.
+    with transaction.atomic():
+        email = Email.objects.select_for_update().get(pk=email_id)
+        # A re-run of WF2 (retried execution, manual re-run) gets the saved triage back;
+        # the idempotency keys stop repeated outside actions.
+        if email.status in (Status.TRIAGED, Status.NEEDS_REVIEW) and email.latest_triage:
+            return process.payload(email, email.latest_triage, rerun=True)
+        if not state.can_transition(email.status, Status.TRIAGED):
+            raise state.InvalidTransition(email.status, Status.TRIAGED)
 
-    result = triage(
-        EmailInput(
-            from_email=email.from_email,
-            from_name=email.from_name,
-            subject=email.subject,
-            body_clean=email.body_clean,
-            attachments=email.attachments,
-            received_at=email.received_at,
+        result = triage(
+            EmailInput(
+                from_email=email.from_email,
+                from_name=email.from_name,
+                subject=email.subject,
+                body_clean=email.body_clean,
+                attachments=email.attachments,
+                received_at=email.received_at,
+            )
         )
-    )
-    Triage.objects.create(
-        email=email,
-        category=result.category,
-        urgency=result.urgency,
-        confidence=result.confidence,
-        reason=result.reason,
-        fields=result.fields,
-        field_confidence=result.field_confidence,
-        missing_fields=result.missing_fields,
-        flags=result.flags,
-        injection_flag=result.injection_flag,
-        route=result.route,
-        review_reason=result.review_reason,
-        model_classify=result.model_classify,
-        model_extract=result.model_extract,
-        input_tokens=result.input_tokens,
-        output_tokens=result.output_tokens,
-        cost_usd=result.cost_usd,
-        latency_ms=result.latency_ms,
-    )
-    email.category, email.urgency = result.category, result.urgency
-    email.save(update_fields=["category", "urgency", "updated_at"])
-    target = Status.NEEDS_REVIEW if result.route == "review" else Status.TRIAGED
-    state.transition(email, target, reason=result.review_reason or None)
+        triage_row = Triage.objects.create(
+            email=email,
+            category=result.category,
+            urgency=result.urgency,
+            confidence=result.confidence,
+            reason=result.reason,
+            fields=result.fields,
+            field_confidence=result.field_confidence,
+            missing_fields=result.missing_fields,
+            flags=result.flags,
+            injection_flag=result.injection_flag,
+            route=result.route,
+            review_reason=result.review_reason,
+            model_classify=result.model_classify,
+            model_extract=result.model_extract,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cost_usd=result.cost_usd,
+            latency_ms=result.latency_ms,
+        )
+        email.category, email.urgency = result.category, result.urgency
+        email.save(update_fields=["category", "urgency", "updated_at"])
+        target = Status.NEEDS_REVIEW if result.route == "review" else Status.TRIAGED
+        state.transition(email, target, reason=result.review_reason or None)
 
-    return {
-        "id": email.id,
-        "status": email.status,
-        "category": result.category,
-        "urgency": result.urgency,
-        "confidence": result.confidence,
-        "fields": result.fields,
-        "missing_fields": result.missing_fields,
-        "flags": result.flags,
-        "injection_flag": result.injection_flag,
-        "route": result.route,
-        "review_reason": result.review_reason,
-        "dashboard_url": f"{settings.DASHBOARD_BASE_URL.rstrip('/')}/emails/{email.id}/",
-    }
+    return process.payload(email, triage_row)
 
 
 # --- Status -------------------------------------------------------------------------
@@ -207,6 +192,8 @@ class StatusIn(Schema):
 @api.post("/emails/{email_id}/status")
 def set_status(request, email_id: int, payload: StatusIn):
     email = get_object_or_404(Email, pk=email_id)
+    if email.status == Status.FAILED and payload.status == Status.RECEIVED:  # Retry
+        release_pending_claims(email)
     state.transition(email, payload.status, reason=payload.reason)
     return {"id": email.id, "status": email.status}
 
@@ -243,7 +230,63 @@ def list_actions(request, email_id: int, key: Optional[str] = None):
     if key:
         qs = qs.filter(idempotency_key=key)
     actions = [_action_out(a) for a in qs.order_by("id")]
-    return {"exists": bool(actions) if key else None, "actions": actions}
+    if not key:
+        return {"exists": None, "done": None, "actions": actions}
+    # `done` = it exists and succeeded; a failed attempt may be repeated.
+    return {"exists": bool(actions), "done": bool(actions) and actions[0]["ok"],
+            "response": actions[0]["response"] if actions else {}, "actions": actions}
+
+
+class ClaimIn(Schema):
+    kind: str
+    idempotency_key: str
+
+
+CLAIM_TTL = timedelta(minutes=10)
+
+
+def release_pending_claims(email: Email) -> int:
+    """A failed run never finishes its claimed actions; free them so a retry repeats them."""
+    released = 0
+    for action in Action.objects.filter(email=email, ok=False):
+        if action.response.get("pending"):
+            action.response = {"released": True, "claimed_at": action.response.get("claimed_at")}
+            action.save(update_fields=["response"])
+            released += 1
+    return released
+
+
+@api.post("/emails/{email_id}/actions/claim")
+def claim_action(request, email_id: int, payload: ClaimIn):
+    """Atomically reserve an idempotency key before an outside call.
+
+    proceed=true: this run owns the key and must make the call, then log it.
+    done=true: it already succeeded; `response` holds the saved result.
+    Both false: another run holds a fresh claim; skip.
+    A failed attempt, or a claim older than 10 minutes (a crashed run), can be re-claimed.
+    """
+    email = get_object_or_404(Email, pk=email_id)
+    if payload.kind not in {k for k, _ in Action.KINDS}:
+        return api.create_response(request, {"detail": f"unknown kind {payload.kind}"}, status=422)
+    now = timezone.now()
+    pending = {"pending": True, "claimed_at": now.isoformat()}
+    try:
+        with transaction.atomic():
+            Action.objects.create(email=email, kind=payload.kind, idempotency_key=payload.idempotency_key,
+                                  response=pending, ok=False)
+        return {"proceed": True, "done": False, "response": {}}
+    except IntegrityError:
+        pass
+    with transaction.atomic():
+        action = Action.objects.select_for_update().get(idempotency_key=payload.idempotency_key)
+        if action.ok:
+            return {"proceed": False, "done": True, "response": action.response}
+        claimed_at = action.response.get("claimed_at") if action.response.get("pending") else None
+        if claimed_at and now - datetime.fromisoformat(claimed_at) < CLAIM_TTL:
+            return {"proceed": False, "done": False, "response": {}}
+        action.response, action.ok = pending, False
+        action.save(update_fields=["response", "ok"])
+    return {"proceed": True, "done": False, "response": {}}
 
 
 @api.post("/emails/{email_id}/actions")
@@ -266,6 +309,9 @@ def log_action(request, email_id: int, payload: ActionIn):
     except IntegrityError:
         action = Action.objects.get(idempotency_key=payload.idempotency_key)
         created = False
+        if not action.ok:  # an earlier attempt failed; record the new outcome
+            action.request, action.response, action.ok = _redact(payload.request), _redact(payload.response), payload.ok
+            action.save(update_fields=["request", "response", "ok"])
     return {"created": created, **_action_out(action)}
 
 
@@ -289,6 +335,8 @@ def record_failure(request, payload: FailureIn):
         error=payload.error,
         execution_id=payload.execution_id[:100],
     )
+    if email:
+        release_pending_claims(email)
     if email and state.can_transition(email.status, Status.FAILED):
         state.transition(email, Status.FAILED, reason=f"{payload.workflow} failed at {payload.node}: {payload.error}"[:1000])
     return {"id": failure.id, "email_status": email.status if email else None}

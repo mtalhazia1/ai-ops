@@ -14,7 +14,8 @@ the portfolio README is written at M6.
 | M0 Skeleton | Done: compose stack healthy, models, admin, `/internal/health` with token check, pytest |
 | M1 Intake | Django side done and tested; WF1 exported. Needs a Gmail test account + OAuth in n8n to finish |
 | M2 Triage | Code, prompts, 22 labelled emails and `run_eval` done; needs an `ANTHROPIC_API_KEY` run to check the ≥85% target |
-| M3–M6 | Not started |
+| M3 Routing and actions | WF2 built and verified end to end against mocks (HubSpot, ShipMatch on/off, Slack, review routing, idempotency under parallel runs). Needs real HubSpot/Slack/ShipMatch credentials for the live check |
+| M4–M6 | Not started |
 
 ## Quick start
 
@@ -48,6 +49,7 @@ Every route needs `X-Internal-Token: $INTERNAL_TOKEN`; anything else gets 401.
 | `GET /internal/emails/{id}` | Email summary for n8n |
 | `POST /internal/emails/{id}/triage` | Clean → classify → extract → validate → save `Triage` → `{category, urgency, fields, missing_fields, route, review_reason}` |
 | `POST /internal/emails/{id}/status` | State change; disallowed transitions return 409 |
+| `POST /internal/emails/{id}/actions/claim` | Reserve an idempotency key before an outside call → `{proceed, done, response}` |
 | `GET/POST /internal/emails/{id}/actions` | Log outside actions with a unique idempotency key; `?key=` checks whether one was done |
 | `POST /internal/failures` | WF4 error handler; marks the email `failed` |
 
@@ -64,6 +66,9 @@ DATABASE_URL=postgres://inbox:inbox@localhost:5432/inbox pytest
 ```
 
 LLM calls are mocked in tests. CI runs the same suite (`.github/workflows/tests.yml`).
+
+To run the workflows end to end without any accounts, use the mock services: see
+"Running offline with mocks" in [`n8n/README.md`](n8n/README.md).
 
 ## Evaluation
 
@@ -88,4 +93,5 @@ app/            Django project (config/, inbox/, evals/, tests/)
   inbox/llm/    client.py (Anthropic wrapper), schemas.py, prompts/, triage.py, guard.py
 n8n/workflows/  exported workflow JSON
 docker/         Postgres init script
+dev/            mock services + e2e script for offline testing (not used in production)
 ```

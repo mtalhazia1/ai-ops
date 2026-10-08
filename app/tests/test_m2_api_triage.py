@@ -22,14 +22,24 @@ def test_triage_endpoint_saves_row_and_moves_state(api, fake_llm):
     assert email.category == "quote_request" and email.status == "triaged"
 
 
-def test_triage_twice_is_409(api, fake_llm):
+def test_triage_rerun_returns_saved_result(api, fake_llm):
+    llm = fake_llm()
+    email_id = _create(api)
+    first = api("post", f"/emails/{email_id}/triage").json()
+    second = api("post", f"/emails/{email_id}/triage")
+    assert second.status_code == 200
+    assert second.json()["rerun"] is True and second.json()["category"] == first["category"]
+    assert Triage.objects.count() == 1
+    assert len(llm.calls) == 2  # classify + extract, once
+
+
+def test_triage_after_approval_is_409(api, fake_llm):
     fake_llm()
     email_id = _create(api)
-    assert api("post", f"/emails/{email_id}/triage").status_code == 200
+    api("post", f"/emails/{email_id}/triage")
+    api("post", f"/emails/{email_id}/status", {"status": "awaiting_approval"})
     response = api("post", f"/emails/{email_id}/triage")
-    assert response.status_code == 409
-    assert response.json()["current"] == "triaged"
-    assert Triage.objects.count() == 1
+    assert response.status_code == 409 and response.json()["current"] == "awaiting_approval"
 
 
 def test_review_route_sets_needs_review(api, fake_llm):
@@ -57,7 +67,7 @@ def test_actions_are_idempotent(api):
     assert second["response"] == {"id": "123"}  # the original record wins
     assert Action.objects.get().request == {"token": "[redacted]", "name": "x"}
     lookup = api("get", f"/emails/{email_id}/actions?key=hubspot_deal:{email_id}").json()
-    assert lookup["exists"] is True
+    assert lookup["exists"] is True and lookup["done"] is True and lookup["response"] == {"id": "123"}
     assert api("get", f"/emails/{email_id}/actions?key=reply_sent:{email_id}").json()["exists"] is False
 
 
@@ -73,3 +83,15 @@ def test_failure_marks_email_failed_and_retry_resets(api):
     assert body["email_status"] == "failed"
     assert Failure.objects.get().node == "HubSpot"
     assert api("post", f"/emails/{email_id}/status", {"status": "received"}).json()["status"] == "received"
+
+
+def test_failed_action_can_be_retried(api):
+    email_id = _create(api)
+    key = f"shipmatch_upload:{email_id}:a1"
+    api("post", f"/emails/{email_id}/actions", {"kind": "shipmatch_upload", "idempotency_key": key, "ok": False,
+                                                 "response": {"status": 402}})
+    assert api("get", f"/emails/{email_id}/actions?key={key}").json()["done"] is False
+    retry = api("post", f"/emails/{email_id}/actions", {"kind": "shipmatch_upload", "idempotency_key": key,
+                                                         "response": {"id": "doc-1"}}).json()
+    assert retry["ok"] is True and retry["response"] == {"id": "doc-1"}
+    assert api("get", f"/emails/{email_id}/actions?key={key}").json()["done"] is True

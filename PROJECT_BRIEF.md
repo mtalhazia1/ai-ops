@@ -4,7 +4,7 @@
 > before coding started. A new chat (or a new developer) should read this file first, then build milestone by
 > milestone (Section 16). If something here conflicts with a later decision, update this file.
 >
-> Written: 2026-10-08. Status: M0 done; M1 and M2 code done (see Section 21 for decisions made while building).
+> Written: 2026-10-08. Status: M0 done; M1, M2 and M3 built (see Section 21 for decisions made while building).
 
 ---
 
@@ -716,3 +716,10 @@ Times assume about 4–6 focused hours a day. Do not start a milestone until the
 | 2026-10-08 | State machine allows `needs_review → awaiting_approval` (re-draft after an edit) and `failed → received` (Retry). | Needed by the review queue and the Retry button. |
 | 2026-10-08 | WF1 reads the message with the Gmail API (`format=full`) via an HTTP node using the Gmail credential, then a Code node builds the payload. | Gives attachment metadata without downloading attachments at intake. |
 | 2026-10-08 | Eval dataset emails use `received_at` 2026-10-08 (a Thursday) so relative dates ("next Tuesday", "kal") have fixed expected values. | Deterministic date labels. |
+| 2026-10-08 | Outside actions use an atomic claim (`POST /internal/emails/{id}/actions/claim`) instead of "check, then create". A claim expires after 10 minutes; recording a failure or Retry releases it. | Two WF2 runs for the same email at once (Retry while running, n8n retry) both passed a plain check. Verified: 18 overlapping runs → one deal, note, task, upload set and alert. |
+| 2026-10-08 | Triage holds a row lock on the email for its whole run; a parallel or repeated call returns the saved triage (`rerun: true`) instead of a 409. | Parallel runs paid for two LLM triages and one hit 409. Re-runs of WF2 are now safe. |
+| 2026-10-08 | Django sets `needs_review` itself during triage; WF2 doesn't call `/status` for the review route. | One fewer call; the state rule stays in Django. |
+| 2026-10-08 | HubSpot contact = batch upsert keyed on email, with only email/first/last name from the Gmail header. Company/phone go into the note. | Upsert can't duplicate; LLM output never overwrites CRM identity fields. |
+| 2026-10-08 | WF2 calls HubSpot, Slack, ShipMatch and Gmail attachments with HTTP Request nodes using n8n's predefined credentials; base URLs can be overridden by env vars. | Full control of HubSpot associations/pipelines, and the whole flow can run against `dev/mocks` offline. |
+| 2026-10-08 | WF2 has a second trigger: `POST /webhook/process` guarded by the `x-webhook-secret` header. | The dashboard Retry button (M5) and the offline e2e script use it. |
+| 2026-10-08 | Worker health check on port 5680 (5679 is n8n's task-runner broker); `N8N_LISTEN_ADDRESS=0.0.0.0`. | Port clash; hosts without IPv6. |
