@@ -1,0 +1,27 @@
+{
+  "id": "quote_003",
+  "from": "Nadia Ahmed <nadia@zenith-eng.example>",
+  "subject": "Shipping quote",
+  "body": "Hello,\n\nCan you quote for moving some machinery parts to Islamabad? Let me know what you need from us.\n\nRegards,\nNadia",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "destination_city": "Islamabad",
+      "commodity": "machinery parts"
+    },
+    "must_be_null": [
+      "origin_city",
+      "pickup_date",
+      "weight_kg",
+      "pieces",
+      "hazardous"
+    ]
+  },
+  "tags": [
+    "missing_fields"
+  ]
+}

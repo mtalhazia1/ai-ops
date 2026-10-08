@@ -1,0 +1,40 @@
+{
+  "id": "claim_001",
+  "from": "Omar Farooq <omar@farooq-retail.example>",
+  "subject": "Damaged delivery SH-1022",
+  "body": "Hi,\n\nCargo arrived damaged today, 2 cartons crushed. Shipment ref SH-1022. Photos attached.\n\nOmar",
+  "attachments": [
+    {
+      "filename": "IMG_2041.jpg",
+      "mime": "image/jpeg",
+      "size": 120000,
+      "gmail_attachment_id": "att-IMG_2041.jpg"
+    },
+    {
+      "filename": "IMG_2042.jpg",
+      "mime": "image/jpeg",
+      "size": 120000,
+      "gmail_attachment_id": "att-IMG_2042.jpg"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "claim",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "SH-1022"
+      ],
+      "pieces_affected": 2,
+      "photos_attached": true
+    },
+    "must_be_null": [
+      "estimated_value",
+      "currency"
+    ]
+  },
+  "tags": [
+    "clean"
+  ]
+}

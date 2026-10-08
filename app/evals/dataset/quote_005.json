@@ -1,0 +1,28 @@
+{
+  "id": "quote_005",
+  "from": "Bilal <bilal@pakchem.example>",
+  "subject": "Rate request + tracking",
+  "body": "Hi,\nNeed a rate for 2 pallets Lahore to Peshawar, pickup Monday.\nAlso, where is container CSQU3054383?\nThanks, Bilal",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Lahore",
+      "destination_city": "Peshawar",
+      "pieces": 2,
+      "package_type": "pallet",
+      "pickup_date": "2026-10-12"
+    },
+    "must_be_null": [
+      "weight_kg",
+      "hazardous"
+    ]
+  },
+  "tags": [
+    "two_requests"
+  ],
+  "label_note": "Two requests; rule order puts quote_request before shipment_status."
+}

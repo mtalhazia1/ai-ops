@@ -1,0 +1,35 @@
+{
+  "id": "paper_003",
+  "from": "Rabia <rabia@indusfreight.example>",
+  "subject": "Fwd: Docs for October shipment",
+  "body": "Please process.\n\n---------- Forwarded message ---------\nFrom: Billing <billing@shah-logistics.example>\nDate: Wed, Oct 7, 2026 at 2:15 PM\nSubject: Docs for October shipment\n\nHi, attached are the invoice INV-77812 and packing list for the October shipment. Regards, Shah Logistics",
+  "attachments": [
+    {
+      "filename": "INV-77812.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-INV-77812.pdf"
+    },
+    {
+      "filename": "Packing_List.xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "size": 30000,
+      "gmail_attachment_id": "att-Packing_List.xlsx"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "INV-77812"
+      ]
+    },
+    "must_be_null": []
+  },
+  "tags": [
+    "forwarded"
+  ]
+}

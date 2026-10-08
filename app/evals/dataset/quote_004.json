@@ -1,0 +1,28 @@
+{
+  "id": "quote_004",
+  "from": "Imran Qureshi <imran@qtech-trading.example>",
+  "subject": "LCL quote Karachi to Dubai",
+  "body": "Dear team,\n\nPlease quote LCL from Karachi to Dubai: 6 cartons, 850 kg total, non-hazardous electronics accessories. Cargo ready for pickup on 20 October.\n\nBest,\nImran Qureshi\nQTech Trading\nMob: +92 321 4455667",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Karachi",
+      "destination_city": "Dubai",
+      "mode": "LCL",
+      "pieces": 6,
+      "package_type": "carton",
+      "weight_kg": 850,
+      "hazardous": false,
+      "pickup_date": "2026-10-20",
+      "contact_phone": "+92 321 4455667"
+    },
+    "must_be_null": []
+  },
+  "tags": [
+    "signature"
+  ]
+}

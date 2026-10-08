@@ -1,0 +1,24 @@
+{
+  "id": "booking_003",
+  "from": "Usman <usman.traders@mail.example>",
+  "subject": "bookng",
+  "body": "bookng confirm kr dein quote Q1103 k against. pickup 15 oct, delivery Hyderabad warehouse. thx",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q1103",
+      "pickup_date": "2026-10-15"
+    },
+    "must_be_null": [
+      "pickup_address"
+    ]
+  },
+  "tags": [
+    "roman_urdu",
+    "typos"
+  ]
+}

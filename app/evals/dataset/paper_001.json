@@ -1,0 +1,36 @@
+{
+  "id": "paper_001",
+  "from": "Accounts <accounts@crescent-haulage.example>",
+  "subject": "Invoice INV-2201 and B/L",
+  "body": "Dear Indus Freight,\n\nPlease find attached invoice INV-2201 and the bill of lading for shipment SH-889.\n\nKind regards,\nAccounts, Crescent Haulage",
+  "attachments": [
+    {
+      "filename": "INV-2201.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-INV-2201.pdf"
+    },
+    {
+      "filename": "BL_SH-889.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-BL_SH-889.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "INV-2201",
+        "SH-889"
+      ]
+    },
+    "must_be_null": []
+  },
+  "tags": [
+    "clean"
+  ]
+}

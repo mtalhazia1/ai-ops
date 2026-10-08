@@ -1,0 +1,15 @@
+:root { --fg:#1d2330; --muted:#6b7280; --line:#e5e7eb; --bg:#fafafa; --accent:#2563eb; --bad:#b91c1c; --ok:#047857; }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.5 system-ui, sans-serif; color:var(--fg); background:var(--bg); }
+header { display:flex; gap:16px; align-items:center; padding:10px 16px; background:#fff; border-bottom:1px solid var(--line); }
+header a { color:var(--fg); text-decoration:none; } header strong { margin-right:auto; }
+main { max-width:1100px; margin:0 auto; padding:16px; }
+table { width:100%; border-collapse:collapse; background:#fff; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { font-weight:600; color:var(--muted); font-size:12px; text-transform:uppercase; }
+.pill { display:inline-block; padding:0 8px; border-radius:10px; background:#eef2ff; font-size:12px; }
+.pill.needs_review, .pill.failed { background:#fee2e2; color:var(--bad); }
+.pill.done { background:#d1fae5; color:var(--ok); }
+pre { white-space:pre-wrap; background:#fff; border:1px solid var(--line); padding:10px; }
+form.filters { display:flex; gap:8px; margin-bottom:12px; }
+.muted { color:var(--muted); }

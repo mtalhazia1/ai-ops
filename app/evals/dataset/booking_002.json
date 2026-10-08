@@ -1,0 +1,24 @@
+{
+  "id": "booking_002",
+  "from": "Ayesha Malik <ayesha@malik-ceramics.example>",
+  "subject": "RE: Quote Q-1077 Lahore-Multan",
+  "body": "Rate is fine, please go ahead and book it. Pickup Monday the 12th, morning.\n\nOn Tue, Oct 6, 2026 at 4:10 PM Indus Freight Ops <ops@indusfreight.example> wrote:\n> Dear Ayesha,\n> Thank you for your request. Please find our quote Q-1077 for 3 pallets Lahore to Multan.\n> Regards, Ops Team\n>\n> On Tue, Oct 6, 2026 at 11:02 AM Ayesha Malik wrote:\n>> Need a rate for 3 pallets of tiles Lahore to Multan.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1077",
+      "pickup_date": "2026-10-12"
+    },
+    "must_be_null": [
+      "delivery_address"
+    ]
+  },
+  "tags": [
+    "reply_chain"
+  ],
+  "label_note": "The quote number survives only in the subject once the quoted history is cleaned."
+}

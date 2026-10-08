@@ -1,0 +1,30 @@
+{
+  "id": "paper_002",
+  "from": "Kamran <kamran@north-carriers.example>",
+  "subject": "CN",
+  "body": "PFA credit note CN-0098 against invoice 4410.",
+  "attachments": [
+    {
+      "filename": "CN-0098.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-CN-0098.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "low",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "CN-0098",
+        "4410"
+      ]
+    },
+    "must_be_null": []
+  },
+  "tags": [
+    "short"
+  ]
+}

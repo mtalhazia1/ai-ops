@@ -1,0 +1,26 @@
+{
+  "id": "claim_002",
+  "from": "Zainab Ali <zainab@ali-rice.example>",
+  "subject": "Shortage on delivery - compensation",
+  "body": "Dear team,\n\nWe received a shortage of 3 bags of rice on delivery for B/L KHI-55102. Value approx PKR 85,000. We want compensation for this loss.\n\nRegards,\nZainab",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "claim",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "KHI-55102"
+      ],
+      "pieces_affected": 3,
+      "estimated_value": 85000,
+      "currency": "PKR",
+      "photos_attached": false
+    },
+    "must_be_null": []
+  },
+  "tags": [
+    "clean"
+  ]
+}

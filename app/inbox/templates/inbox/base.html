@@ -1,0 +1,17 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AI Ops Inbox{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'inbox/style.css' %}">
+</head>
+<body>
+<header>
+  <strong>AI Ops Inbox</strong>
+  <a href="{% url 'inbox:email_list' %}">Emails</a>
+  <a href="{% url 'inbox:eval_list' %}">Evaluations</a>
+  <a href="/admin/">Admin</a>
+</header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

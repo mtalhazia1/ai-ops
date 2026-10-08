@@ -1,0 +1,32 @@
+{% extends "inbox/base.html" %}
+{% block content %}
+<h2>{{ email.subject|default:"(no subject)" }}</h2>
+<p class="muted">From {{ email.from_name }} &lt;{{ email.from_email }}&gt; · {{ email.received_at }} ·
+  <span class="pill {{ email.status }}">{{ email.status }}</span></p>
+{% if email.needs_review_reason %}<p><strong>Review reason:</strong> {{ email.needs_review_reason }}</p>{% endif %}
+{% if email.attachments %}<p><strong>Attachments:</strong> {% for a in email.attachments %}{{ a.filename }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+<h3>Cleaned body</h3>
+<pre>{{ email.body_clean }}</pre>
+<h3>Triage history</h3>
+<table>
+  <tr><th>When</th><th>Category</th><th>Conf.</th><th>Route</th><th>Fields</th><th>Missing</th><th>Flags</th><th>Cost</th></tr>
+  {% for t in triages %}
+  <tr>
+    <td class="muted">{{ t.created_at|date:"M j, H:i" }}</td>
+    <td>{{ t.category }} / {{ t.urgency }}</td>
+    <td>{{ t.confidence|floatformat:2 }}</td>
+    <td>{{ t.route }}{% if t.review_reason %}<br><span class="muted">{{ t.review_reason }}</span>{% endif %}</td>
+    <td><pre>{{ t.fields|pprint }}</pre></td>
+    <td>{{ t.missing_fields|join:", " }}</td>
+    <td>{{ t.flags|join:", " }}{% if t.injection_flag %} <strong>injection</strong>{% endif %}</td>
+    <td>${{ t.cost_usd }}</td>
+  </tr>
+  {% empty %}<tr><td colspan="8" class="muted">Not triaged yet.</td></tr>{% endfor %}
+</table>
+<h3>Actions</h3>
+<table>
+  <tr><th>When</th><th>Kind</th><th>Key</th><th>OK</th></tr>
+  {% for a in actions %}<tr><td class="muted">{{ a.created_at|date:"M j, H:i" }}</td><td>{{ a.kind }}</td><td>{{ a.idempotency_key }}</td><td>{{ a.ok }}</td></tr>
+  {% empty %}<tr><td colspan="4" class="muted">None.</td></tr>{% endfor %}
+</table>
+{% endblock %}

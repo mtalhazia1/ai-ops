@@ -1,0 +1,16 @@
+{
+  "id": "other_002",
+  "from": "Hassan Shah <hassan@shah-logistics.example>",
+  "subject": "Automatic reply: Rate request",
+  "body": "I am out of the office until 12 October with limited access to email. For urgent matters please contact my colleague.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "out_of_office"
+  ]
+}
