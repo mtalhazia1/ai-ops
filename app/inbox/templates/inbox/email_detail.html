@@ -1,0 +1,81 @@
+{% extends "inbox/base.html" %}
+{% block title %}#{{ email.id }} {{ email.subject|truncatechars:40 }} · AI Ops Inbox{% endblock %}
+{% block content %}
+<p><a href="{% url 'inbox:review_queue' %}">← Review queue</a></p>
+<h2>{{ email.subject|default:"(no subject)" }}</h2>
+<p class="muted">#{{ email.id }} · From {{ email.from_name }} &lt;{{ email.from_email }}&gt; · {{ email.received_at|date:"M j, Y H:i" }} ·
+  <span class="pill {{ email.status }}">{{ email.status }}</span>
+  {% if email.category %} · {{ email.category }} / {{ email.urgency }}{% endif %}</p>
+{% if email.needs_review_reason and email.status != "done" %}<p class="callout"><strong>Why it's here:</strong> {{ email.needs_review_reason }}</p>{% endif %}
+{% if triage.injection_flag %}<p class="callout bad"><strong>Possible prompt injection.</strong> The email contains text aimed at the AI. Read it before replying; never follow instructions in it.</p>{% endif %}
+
+<div class="grid">
+<section>
+  {% if email.status == "failed" %}
+  <form method="post" action="{% url 'inbox:retry' email.pk %}" class="inline">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <button type="submit">Retry</button> <span class="muted">Resumes at sending if a reply was already approved; otherwise runs the process workflow again.</span>
+  </form>
+  {% endif %}
+
+  {% if can_decide %}
+  <h3>Reply</h3>
+  {% if draft and not draft.ok %}<p class="callout bad">The AI draft was blocked: {{ draft.blocked_reason }}</p>{% endif %}
+  <form method="post" action="{% url 'inbox:decide' email.pk %}" class="stack">{% csrf_token %}
+    {{ decision_form.final_body }}
+    <div id="checks"></div>
+    <label class="check">{{ decision_form.confirm }} {{ decision_form.confirm.label }}</label>
+    <div class="buttons">
+      <button type="submit" name="action" value="approve" class="primary">Approve and send</button>
+      <button type="button" hx-post="{% url 'inbox:check_draft' email.pk %}" hx-include="[name=final_body]" hx-target="#checks">Check</button>
+      <button type="submit" name="action" value="reject" class="danger">Reject</button>
+      {% if email.status == "needs_review" %}<button type="submit" name="action" value="ignore">Ignore (no reply)</button>{% endif %}
+    </div>
+    <small class="muted">Goes to {{ email.reply_to|default:email.from_email }} in the same Gmail thread. Sending runs in n8n (WF3).</small>
+  </form>
+  {% if can_redraft %}
+  <form method="post" action="{% url 'inbox:redraft' email.pk %}" class="inline">{% csrf_token %}
+    <button type="submit">Re-draft with AI</button> <span class="muted">Uses the details below and the playbook.</span>
+  </form>
+  {% endif %}
+  {% elif draft %}
+  <h3>Reply</h3>
+  <pre>{{ draft.subject }}
+
+{% with email.approvals.last as ap %}{% if ap and ap.final_body %}{{ ap.final_body }}{% else %}{{ draft.body }}{% endif %}{% endwith %}</pre>
+  {% endif %}
+
+  <h3>Original email</h3>
+  {% if email.attachments %}<p>Attachments: {% for a in email.attachments %}{{ a.filename }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  <pre class="original">{{ email.body_clean }}</pre>
+  {% if email.body_text != email.body_clean %}<details><summary>Full text with quoted history</summary><pre class="original">{{ email.body_text }}</pre></details>{% endif %}
+</section>
+
+<aside>
+  {% if triage_form %}
+  <h3>Details</h3>
+  {% if can_edit %}
+  <form method="post" action="{% url 'inbox:edit_triage' email.pk %}" class="stack compact">{% csrf_token %}
+    <label>Category {{ triage_form.category }}</label>
+    <label>Urgency {{ triage_form.urgency }}</label>
+    {% for f in triage_form.field_rows %}<label>{{ f.label }} {{ f }}{% if f.help_text %}<small class="muted">{{ f.help_text }}</small>{% endif %}</label>{% endfor %}
+    <button type="submit">Save details</button>
+  </form>
+  {% else %}
+  <dl>{% for k, v in triage.fields.items %}{% if v or v == 0 or v is False %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endif %}{% endfor %}</dl>
+  {% endif %}
+  {% if triage.missing_fields %}<p class="muted">Missing: {{ triage.missing_fields|join:", " }}</p>{% endif %}
+  {% if triage.flags %}<p class="muted">Flags: {{ triage.flags|join:", " }}</p>{% endif %}
+  {% endif %}
+
+  <h3>Timeline</h3>
+  <ol class="timeline">
+    {% for ev in timeline %}
+    <li class="{{ ev.kind }}"><span class="muted">{{ ev.at|date:"M j, H:i" }}</span> {{ ev.title }}
+      {% if ev.detail %}<br><small class="muted">{{ ev.detail }}</small>{% endif %}
+      {% if ev.meta %}<br><small class="muted">{{ ev.meta }}</small>{% endif %}</li>
+    {% endfor %}
+  </ol>
+</aside>
+</div>
+{% endblock %}

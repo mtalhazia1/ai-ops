@@ -1,0 +1,18 @@
+{
+  "id": "other_008",
+  "from": "Zubair <zubair@zubair-co.example>",
+  "subject": "hello",
+  "body": "hi, saw your website. call me.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "normal",
+    "route": "review"
+  },
+  "tags": [
+    "unclear",
+    "short"
+  ],
+  "label_note": "No clear request; a person decides."
+}

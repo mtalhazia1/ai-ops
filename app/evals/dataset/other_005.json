@@ -1,0 +1,16 @@
+{
+  "id": "other_005",
+  "from": "Mail Delivery Subsystem <mailer-daemon@googlemail.example>",
+  "subject": "Delivery Status Notification (Failure)",
+  "body": "Address not found. Your message wasn't delivered to sales@old-client.example because the address couldn't be found.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "bounce"
+  ]
+}

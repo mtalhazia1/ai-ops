@@ -1,0 +1,26 @@
+{% extends "inbox/base.html" %}
+{% block title %}Failures · AI Ops Inbox{% endblock %}
+{% block content %}
+<h2>Failures</h2>
+<p>{% if show_all %}<a href="?">Open only</a>{% else %}<a href="?all=1">Show resolved too</a>{% endif %}</p>
+<table>
+  <thead><tr><th>When</th><th>Workflow</th><th>Node</th><th>Error</th><th>Email</th><th></th></tr></thead>
+  {% for f in failures %}
+  <tr class="{% if f.resolved %}muted{% endif %}">
+    <td class="nowrap">{{ f.created_at|date:"M j, H:i" }}</td>
+    <td>{{ f.workflow }}<br><small class="muted">execution {{ f.execution_id }}</small></td>
+    <td>{{ f.node }}</td>
+    <td><small>{{ f.error|truncatechars:240 }}</small></td>
+    <td>{% if f.email %}<a href="{% url 'inbox:email_detail' f.email.pk %}">#{{ f.email.pk }} {{ f.email.subject|truncatechars:40 }}</a><br><span class="pill {{ f.email.status }}">{{ f.email.status }}</span>{% else %}–{% endif %}</td>
+    <td class="nowrap">
+      {% if not f.resolved %}
+        {% if f.email and f.email.status == "failed" %}
+        <form method="post" action="{% url 'inbox:retry' f.email.pk %}" class="inline">{% csrf_token %}<button type="submit">Retry</button></form>
+        {% endif %}
+        <form method="post" action="{% url 'inbox:resolve_failure' f.pk %}" class="inline">{% csrf_token %}<button type="submit">Resolve</button></form>
+      {% else %}resolved{% if f.retried_at %} (retried {{ f.retried_at|date:"M j, H:i" }}){% endif %}{% endif %}
+    </td>
+  </tr>
+  {% empty %}<tr><td colspan="6" class="muted">No open failures.</td></tr>{% endfor %}
+</table>
+{% endblock %}

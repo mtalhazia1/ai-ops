@@ -1,0 +1,28 @@
+{
+  "id": "paper_009",
+  "from": "Shah Logistics <billing@shah-logistics.example>",
+  "subject": "Proof of delivery SH-1301",
+  "body": "Hello, signed POD for shipment SH-1301 attached. Invoice will follow.",
+  "attachments": [
+    {
+      "filename": "POD_SH-1301.jpg",
+      "mime": "image/jpeg",
+      "size": 120000,
+      "gmail_attachment_id": "att-POD_SH-1301.jpg"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "SH-1301"
+      ]
+    }
+  },
+  "tags": [
+    "clean"
+  ]
+}

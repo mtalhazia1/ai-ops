@@ -1,0 +1,19 @@
+{% extends "inbox/base.html" %}
+{% block content %}
+<h2>Evaluation runs</h2>
+<table>
+  <tr><th>Started</th><th>Dataset</th><th>Models</th><th>Category acc.</th><th>Field acc.</th><th>Injection caught</th><th>Cost/email</th><th></th></tr>
+  {% for r in runs %}
+  <tr>
+    <td>{{ r.started_at|date:"M j, H:i" }}</td>
+    <td>{{ r.dataset_version }}</td>
+    <td class="muted">{{ r.model_classify }}<br>{{ r.model_extract }}</td>
+    <td>{{ r.metrics.category_accuracy }}</td>
+    <td>{{ r.metrics.field_accuracy }}</td>
+    <td>{{ r.metrics.injection_caught }}</td>
+    <td>${{ r.metrics.cost_per_email_usd }}</td>
+    <td><a href="{% url 'inbox:eval_report' r.pk %}">Report</a></td>
+  </tr>
+  {% empty %}<tr><td colspan="8" class="muted">No runs yet. Run <code>python manage.py run_eval</code>.</td></tr>{% endfor %}
+</table>
+{% endblock %}

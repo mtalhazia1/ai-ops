@@ -1,0 +1,21 @@
+{
+  "id": "booking_001",
+  "from": "Hamza Iqbal <hamza@sundar-foods.example>",
+  "subject": "Booking confirmation Q-1042",
+  "body": "Hi team,\n\nConfirming booking for quote Q-1042. Pickup Oct 14 from Plot 45, Sundar Industrial Estate, Lahore. Delivery to our Karachi DC as discussed.\n\nThanks,\nHamza",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1042",
+      "pickup_date": "2026-10-14"
+    },
+    "must_be_null": []
+  },
+  "tags": [
+    "clean"
+  ]
+}

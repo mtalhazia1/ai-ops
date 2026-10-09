@@ -1,0 +1,26 @@
+{
+  "id": "quote_009",
+  "from": "Kashif Mir <kashif@mir-chem.example>",
+  "subject": "DG shipment quote",
+  "body": "Hi team,\nWe have 8 drums of industrial solvent (UN1993, class 3) to move from Port Qasim to Faisalabad, total 1,600 kg. Pickup next Monday. Please quote.\nKashif",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Port Qasim",
+      "destination_city": "Faisalabad",
+      "pieces": 8,
+      "package_type": "drum",
+      "weight_kg": 1600,
+      "hazardous": true,
+      "pickup_date": "2026-10-12"
+    }
+  },
+  "tags": [
+    "hazardous"
+  ],
+  "label_note": "Port Qasim is the origin as written (a port near Karachi); 'next Monday' = 2026-10-12."
+}

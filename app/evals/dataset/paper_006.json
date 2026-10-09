@@ -1,0 +1,34 @@
+{
+  "id": "paper_006",
+  "from": "Accounts <accounts@city-couriers.example>",
+  "subject": "Statement of account",
+  "body": "Hi, PFA our statement of account for September and the credit note CN-771.",
+  "attachments": [
+    {
+      "filename": "SOA_September.xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "size": 40000,
+      "gmail_attachment_id": "att-SOA_September.xlsx"
+    },
+    {
+      "filename": "CN-771.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-CN-771.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "paperwork",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "CN-771"
+      ]
+    }
+  },
+  "tags": [
+    "short"
+  ]
+}

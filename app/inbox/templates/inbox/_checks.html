@@ -1,0 +1,2 @@
+{% if problems %}<ul class="checks bad">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
+{% else %}<p class="checks ok">Passes the checks: no new addresses or links, no amounts, length OK.</p>{% endif %}

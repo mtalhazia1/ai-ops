@@ -1,0 +1,16 @@
+{
+  "id": "other_001",
+  "from": "Freight Weekly <news@freightweekly.example>",
+  "subject": "Freight Weekly: diesel up 4%, port congestion eases",
+  "body": "This week in freight: diesel prices rose 4% nationally. Karachi port congestion eased to 2 days average wait. Read more on our website. Unsubscribe here.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "newsletter"
+  ]
+}

@@ -1,0 +1,19 @@
+{% extends "inbox/base.html" %}
+{% block title %}{{ title }} · AI Ops Inbox{% endblock %}
+{% block content %}
+<h2>{{ title }}</h2>
+<form class="filters" method="get" hx-get="" hx-target="#rows" hx-trigger="change, keyup changed delay:300ms from:input[name=q]" hx-push-url="true">
+  <select name="status"><option value="">All statuses</option>
+    {% for value, label in statuses %}<option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="category"><option value="">All categories</option>
+    {% for value, label in categories %}<option value="{{ value }}" {% if value == category %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <input type="search" name="q" value="{{ q }}" placeholder="Subject or sender">
+  <noscript><button type="submit">Filter</button></noscript>
+</form>
+<table>
+  <thead><tr><th>Received</th><th>From</th><th>Subject</th><th>Category</th><th>Urgency</th><th>Status</th></tr></thead>
+  <tbody id="rows">{% include "inbox/_email_rows.html" %}</tbody>
+</table>
+{% endblock %}

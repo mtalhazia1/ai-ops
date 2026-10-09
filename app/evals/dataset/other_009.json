@@ -1,0 +1,16 @@
+{
+  "id": "other_009",
+  "from": "IT Support <it@indusfreight.example>",
+  "subject": "Password expiry notice",
+  "body": "Your mailbox password will expire in 5 days. Please change it from the IT portal.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "other",
+    "urgency": "low",
+    "route": "review"
+  },
+  "tags": [
+    "internal"
+  ]
+}

@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .box { fill:#fff; stroke:#cbd5e1; stroke-width:1.5; rx:10; }
+      .n8n { fill:#fff7ed; stroke:#fb923c; }
+      .dj { fill:#eff6ff; stroke:#60a5fa; }
+      .ext { fill:#f8fafc; stroke:#94a3b8; }
+      .db { fill:#f0fdf4; stroke:#4ade80; }
+      .h { font-size:17px; font-weight:700; fill:#0f172a; }
+      .t { font-size:13px; fill:#334155; }
+      .s { font-size:12px; fill:#64748b; }
+      .lbl { font-size:12px; fill:#475569; }
+      .line { stroke:#475569; stroke-width:1.6; fill:none; marker-end:url(#arr); }
+      .dash { stroke-dasharray:5 4; }
+    </style>
+  </defs>
+  <rect width="1200" height="720" fill="#ffffff"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">AI Ops Inbox: architecture</text>
+  <text x="40" y="68" class="s">n8n connects the apps and waits for people; Django holds the AI logic, state, checks and UI. Every outgoing email needs a human decision.</text>
+
+  <!-- Gmail -->
+  <rect x="40" y="110" width="170" height="90" class="box ext"/>
+  <text x="58" y="140" class="h">Gmail</text>
+  <text x="58" y="162" class="t">ops@ shared inbox</text>
+  <text x="58" y="182" class="s">labels track progress</text>
+
+  <!-- n8n -->
+  <rect x="270" y="95" width="420" height="300" class="box n8n"/>
+  <text x="290" y="125" class="h">n8n (orchestrator, queue mode)</text>
+  <text x="290" y="152" class="t"><tspan font-weight="700">WF1 Intake</tspan>: poll Gmail → save email → label → WF2</text>
+  <text x="290" y="178" class="t"><tspan font-weight="700">WF2 Process</tspan>: triage → route by category →</text>
+  <text x="306" y="196" class="t">HubSpot / ShipMatch / Slack → draft → approval card</text>
+  <text x="306" y="214" class="t">→ wait for Approve / Reject (or timeout → review)</text>
+  <text x="290" y="240" class="t"><tspan font-weight="700">WF3 Execute</tspan>: record decision → claim → reply in</text>
+  <text x="306" y="258" class="t">the same Gmail thread → done → labels</text>
+  <text x="290" y="284" class="t"><tspan font-weight="700">WF4 Error handler</tspan>: failure row + Slack alert</text>
+  <text x="290" y="310" class="t"><tspan font-weight="700">WF5 Digest</tspan>: 18:00 metrics summary to Slack</text>
+  <text x="290" y="342" class="s">Retries on every external call (not on Gmail send).</text>
+  <text x="290" y="360" class="s">Every outside action is claimed first: exactly once,</text>
+  <text x="290" y="378" class="s">even with parallel or retried runs.</text>
+
+  <!-- External services -->
+  <rect x="760" y="95" width="200" height="64" class="box ext"/>
+  <text x="778" y="122" class="h">HubSpot</text>
+  <text x="778" y="143" class="s">contact, deal, note, task</text>
+  <rect x="760" y="172" width="200" height="64" class="box ext"/>
+  <text x="778" y="199" class="h">ShipMatch</text>
+  <text x="778" y="220" class="s">shipment lookups, doc uploads</text>
+  <rect x="760" y="249" width="200" height="64" class="box ext"/>
+  <text x="778" y="276" class="h">Slack</text>
+  <text x="778" y="297" class="s">approvals, claims, alerts, digest</text>
+  <rect x="990" y="249" width="170" height="64" class="box ext"/>
+  <text x="1008" y="276" class="h">Ops team</text>
+  <text x="1008" y="297" class="s">Approve / Reject / Edit</text>
+
+  <!-- Django -->
+  <rect x="270" y="455" width="420" height="215" class="box dj"/>
+  <text x="290" y="485" class="h">Django ("brain" + dashboard)</text>
+  <text x="290" y="512" class="t"><tspan font-weight="700">/internal API</tspan> (token + Docker network only): emails,</text>
+  <text x="306" y="530" class="t">triage, draft, approval, claims, status (409 on bad moves)</text>
+  <text x="290" y="556" class="t"><tspan font-weight="700">LLM layer</tspan>: classify → extract (evidence required)</text>
+  <text x="306" y="574" class="t">→ guard (injection) → draft → output checks</text>
+  <text x="290" y="600" class="t"><tspan font-weight="700">Dashboard</tspan>: review queue, edit + approve, failures +</text>
+  <text x="306" y="618" class="t">Retry, metrics, playbook, evaluation reports</text>
+  <text x="290" y="648" class="s">run_eval uses the same triage and draft code as production.</text>
+
+  <rect x="40" y="520" width="170" height="90" class="box db"/>
+  <text x="58" y="550" class="h">Postgres</text>
+  <text x="58" y="572" class="t">inbox + n8n DBs</text>
+  <text x="58" y="592" class="s">state, audit trail, costs</text>
+
+  <rect x="760" y="455" width="200" height="80" class="box ext"/>
+  <text x="778" y="484" class="h">Anthropic API</text>
+  <text x="778" y="505" class="s">Haiku: classify</text>
+  <text x="778" y="523" class="s">Sonnet: extract + draft</text>
+
+  <rect x="760" y="560" width="200" height="110" class="box ext"/>
+  <text x="778" y="589" class="h">Caddy (HTTPS)</text>
+  <text x="778" y="610" class="s">dashboard + n8n editor and</text>
+  <text x="778" y="628" class="s">signed approval links only;</text>
+  <text x="778" y="646" class="s">/internal blocked at the edge</text>
+
+  <!-- arrows -->
+  <path d="M210,155 L268,155" class="line"/>
+  <text x="214" y="146" class="lbl">poll</text>
+  <path d="M690,127 L758,127" class="line"/>
+  <path d="M690,204 L758,204" class="line"/>
+  <path d="M690,281 L758,281" class="line"/>
+  <path d="M960,281 L988,281" class="line"/>
+  <path d="M1075,313 C1075,380 700,380 692,345" class="line dash"/>
+  <text x="790" y="408" class="lbl">button click resumes the waiting run</text>
+  <path d="M430,395 L430,453" class="line"/>
+  <path d="M520,453 L520,397" class="line"/>
+  <text x="422" y="420" class="lbl" text-anchor="end">calls /internal API</text>
+  <text x="422" y="436" class="lbl" text-anchor="end">(X-Internal-Token)</text>
+  <text x="528" y="418" class="lbl">webhooks</text>
+  <text x="528" y="434" class="lbl">(dashboard decisions, Retry)</text>
+  <path d="M690,495 L758,495" class="line"/>
+  <path d="M270,565 L212,565" class="line"/>
+  <path d="M270,330 C150,330 125,420 125,518" class="line"/>
+  <path d="M290,395 C230,420 150,320 150,202" class="line dash"/>
+  <text x="62" y="300" class="lbl">reply in thread,</text>
+  <text x="62" y="316" class="lbl">labels</text>
+</svg>

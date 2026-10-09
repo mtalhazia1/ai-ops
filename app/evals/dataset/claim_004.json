@@ -1,0 +1,26 @@
+{
+  "id": "claim_004",
+  "from": "Hassan <hassan@hassan-electronics.example>",
+  "subject": "Missing cartons on delivery",
+  "body": "Dear team,\n\nShipment SH-1388 arrived today short by 4 cartons (we ordered 40, received 36). Please investigate urgently.\n\nHassan",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "claim",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "SH-1388"
+      ],
+      "pieces_affected": 4
+    },
+    "must_be_null": [
+      "estimated_value",
+      "currency"
+    ]
+  },
+  "tags": [
+    "shortage"
+  ]
+}

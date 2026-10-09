@@ -1,0 +1,24 @@
+{
+  "id": "booking_005",
+  "from": "Faisal <faisal@crescent-tex.example>",
+  "subject": "RE: Your quote Q-1150",
+  "body": "Confirmed, book it. Our PO number is PO-55120. Pickup 16 Oct.\n\n-----Original Message-----\nFrom: Indus Freight Ops\nSent: Tuesday, October 6, 2026 2:00 PM\nSubject: Your quote Q-1150\n\nDear Faisal, please find our quote Q-1150 attached.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1150",
+      "pickup_date": "2026-10-16",
+      "reference_numbers": [
+        "PO-55120"
+      ]
+    }
+  },
+  "tags": [
+    "reply_chain",
+    "outlook"
+  ]
+}

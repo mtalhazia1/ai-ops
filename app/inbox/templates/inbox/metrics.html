@@ -1,0 +1,41 @@
+{% extends "inbox/base.html" %}
+{% block title %}Metrics · AI Ops Inbox{% endblock %}
+{% block content %}
+<h2>Metrics</h2>
+<p class="tabs">{% for p in periods %}<a href="?period={{ p }}" class="{% if p == period %}active{% endif %}">{% if p == "today" %}Today{% else %}Last {{ p|slice:":-1" }} days{% endif %}</a>{% endfor %}
+  <span class="muted">since {{ m.since_dt|date:"M j, H:i" }}</span></p>
+<div class="tiles">
+  <div class="tile"><span class="n">{{ m.handled }}</span><span>emails handled</span></div>
+  <div class="tile"><span class="n">{{ m.replies_sent }}</span><span>replies sent</span></div>
+  <div class="tile"><span class="n">{{ m.automatic }}</span><span>fully automatic</span></div>
+  <div class="tile"><span class="n">{{ m.reviewed }}</span><span>needed a person</span></div>
+  <div class="tile"><span class="n">{{ m.avg_minutes_to_reply|default:"–" }}</span><span>avg minutes to reply</span></div>
+  <div class="tile"><span class="n">${{ m.ai_cost_usd }}</span><span>AI cost{% if m.ai_cost_per_email_usd %} (${{ m.ai_cost_per_email_usd }}/email){% endif %}</span></div>
+  <div class="tile"><span class="n">{{ m.injection_flagged }}</span><span>injection attempts blocked</span></div>
+  <div class="tile {% if m.open_failures %}warn{% endif %}"><span class="n">{{ m.failures }}</span><span>failures ({{ m.open_failures }} open)</span></div>
+</div>
+<div class="grid">
+<section>
+  <h3>By category</h3>
+  <table>{% for c, n in m.by_category.items %}<tr><td>{{ c }}</td><td>{{ n }}</td></tr>{% endfor %}</table>
+</section>
+<section>
+  <h3>Waiting now</h3>
+  <table>
+    <tr><td><a href="{% url 'inbox:review_queue' %}?status=needs_review">Needs review</a></td><td>{{ m.needs_review_now }}</td></tr>
+    <tr><td><a href="{% url 'inbox:review_queue' %}?status=awaiting_approval">Awaiting approval</a></td><td>{{ m.awaiting_approval_now }}</td></tr>
+    <tr><td><a href="{% url 'inbox:failures' %}">Open failures</a></td><td>{{ m.open_failures }}</td></tr>
+  </table>
+  <h3>Latest evaluation</h3>
+  {% if eval_run %}
+  <table>
+    <tr><td>Category accuracy</td><td>{{ eval_run.metrics.category_accuracy }}</td></tr>
+    <tr><td>Field accuracy</td><td>{{ eval_run.metrics.field_accuracy }}</td></tr>
+    <tr><td>Injection caught</td><td>{{ eval_run.metrics.injection_caught }}</td></tr>
+    <tr><td>Draft checks passed</td><td>{{ eval_run.metrics.draft_checks_passed }}</td></tr>
+  </table>
+  <p><a href="{% url 'inbox:eval_report' eval_run.pk %}">Full report</a></p>
+  {% else %}<p class="muted">No evaluation run yet.</p>{% endif %}
+</section>
+</div>
+{% endblock %}

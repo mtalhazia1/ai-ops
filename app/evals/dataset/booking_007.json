@@ -1,0 +1,28 @@
+{
+  "id": "booking_007",
+  "from": "Sadia Khan <sadia@khan-foods.example>",
+  "subject": "Booking + docs",
+  "body": "Hello,\nWe accept quote Q-1099 and want to book pickup for 14 October. The packing list is attached for your team.\nSadia",
+  "attachments": [
+    {
+      "filename": "Packing_List_Q1099.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-Packing_List_Q1099.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1099",
+      "pickup_date": "2026-10-14"
+    }
+  },
+  "tags": [
+    "attachment"
+  ],
+  "label_note": "Attachment supports the booking; the purpose is booking, not paperwork."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "booking_009",
+  "from": "Ops Desk <ops@bluewave-imports.example>",
+  "subject": "Fwd: booking request",
+  "body": "Please handle.\n\n---------- Forwarded message ---------\nFrom: Tariq Mehmood <tariq@bluewave-imports.example>\nDate: Wed, Oct 7, 2026\nSubject: booking request\n\nWe want to proceed with quote Q-1175. Pickup on 12 October from Korangi warehouse.",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1175",
+      "pickup_date": "2026-10-12"
+    }
+  },
+  "tags": [
+    "forwarded"
+  ]
+}

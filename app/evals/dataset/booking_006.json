@@ -1,0 +1,21 @@
+{
+  "id": "booking_006",
+  "from": "Naveed <naveed@lucky-cement.example>",
+  "subject": "booking",
+  "body": "pls book 3 trucks agaist quote Q-1201 pikup 13/10 from Hub plant",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1201",
+      "pickup_date": "2026-10-13"
+    }
+  },
+  "tags": [
+    "typos",
+    "short"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "booking_010",
+  "from": "Zara <zara@zara-home.example>",
+  "subject": "Book it + another rate",
+  "body": "Hi! Please book quote Q-1220 for pickup on 15 Oct. Also, can you give me a rate for 2 pallets Lahore to Islamabad next week?",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "booking",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "quote_reference": "Q-1220",
+      "pickup_date": "2026-10-15"
+    }
+  },
+  "tags": [
+    "two_requests"
+  ],
+  "label_note": "Booking ranks above quote_request in the priority rule."
+}

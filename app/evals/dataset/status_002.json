@@ -1,0 +1,24 @@
+{
+  "id": "status_002",
+  "from": "Ali Raza <ali@raza-exports.example>",
+  "subject": "update?",
+  "body": "Any update on container TGHU 123456 8 ? need ETA for customs",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "shipment_status",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "container_numbers": [
+        "TGHU1234568"
+      ]
+    },
+    "must_be_null": []
+  },
+  "tags": [
+    "invalid_container",
+    "short"
+  ],
+  "label_note": "Check digit should be 7; the number is kept but flagged invalid."
+}

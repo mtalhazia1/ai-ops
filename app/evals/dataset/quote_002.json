@@ -1,0 +1,30 @@
+{
+  "id": "quote_002",
+  "from": "Waqas Butt <waqas@butt-spinning.example>",
+  "subject": "truck chahiye",
+  "body": "Salam,\nFaisalabad se Lahore 1 full truck chahiye kal subah. 18 ton cotton yarn hai. Rate bata dein jaldi.\nShukriya",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Faisalabad",
+      "destination_city": "Lahore",
+      "pickup_date": "2026-10-09",
+      "mode": "FTL",
+      "weight_kg": 18000,
+      "commodity": "cotton yarn"
+    },
+    "must_be_null": [
+      "hazardous",
+      "contact_email"
+    ]
+  },
+  "tags": [
+    "roman_urdu",
+    "relative_date"
+  ],
+  "label_note": "kal = tomorrow (2026-10-09). Pickup tomorrow morning plus 'jaldi' makes it high urgency."
+}

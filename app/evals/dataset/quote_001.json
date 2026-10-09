@@ -1,0 +1,30 @@
+{
+  "id": "quote_001",
+  "from": "Sarah Khan <sarah@acme-textiles.example>",
+  "subject": "rate pls",
+  "body": "Hi, need 4 pallets from Lahore to Karachi next Tuesday, approx 1200kg, fabric rolls. Thanks",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "quote_request",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "origin_city": "Lahore",
+      "destination_city": "Karachi",
+      "pickup_date": "2026-10-13",
+      "weight_kg": 1200,
+      "pieces": 4,
+      "package_type": "pallet",
+      "commodity": "fabric rolls"
+    },
+    "must_be_null": [
+      "hazardous",
+      "contact_phone"
+    ]
+  },
+  "tags": [
+    "short",
+    "informal"
+  ]
+}

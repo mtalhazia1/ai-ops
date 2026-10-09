@@ -1,0 +1,16 @@
+{% extends "inbox/base.html" %}
+{% block content %}
+<h2>Playbook</h2>
+<p class="muted">Used by the reply drafter. Last saved {{ playbook.updated_at|date:"M j, H:i" }}{% if playbook.updated_by %} by {{ playbook.updated_by }}{% endif %}.</p>
+<form method="post" class="stack">
+  {% csrf_token %}
+  {% for field in form %}
+    <label>{{ field.label }}
+      {{ field }}
+      {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
+      {% for e in field.errors %}<small class="error">{{ e }}</small>{% endfor %}
+    </label>
+  {% endfor %}
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

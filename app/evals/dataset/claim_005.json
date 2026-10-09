@@ -1,0 +1,38 @@
+{
+  "id": "claim_005",
+  "from": "Maria <maria@fresh-fruits.example>",
+  "subject": "Reefer failure - mangoes spoiled",
+  "body": "The reefer unit failed on trip SH-1402 and 120 crates of mangoes are spoiled. Estimated loss USD 6,500. Photos and temperature log attached. We expect compensation.",
+  "attachments": [
+    {
+      "filename": "photo1.jpg",
+      "mime": "image/jpeg",
+      "size": 120000,
+      "gmail_attachment_id": "att-photo1.jpg"
+    },
+    {
+      "filename": "temp_log.pdf",
+      "mime": "application/pdf",
+      "size": 120000,
+      "gmail_attachment_id": "att-temp_log.pdf"
+    }
+  ],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "claim",
+    "urgency": "high",
+    "route": "auto",
+    "fields": {
+      "reference_numbers": [
+        "SH-1402"
+      ],
+      "pieces_affected": 120,
+      "estimated_value": 6500,
+      "currency": "USD",
+      "photos_attached": true
+    }
+  },
+  "tags": [
+    "value_stated"
+  ]
+}

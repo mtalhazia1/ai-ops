@@ -1,0 +1,24 @@
+{
+  "id": "status_001",
+  "from": "Farah Siddiqui <farah@bluewave-imports.example>",
+  "subject": "Container status",
+  "body": "Hi,\n\nWhere is container MSCU1234566? It was due at Karachi port on Monday and we have not heard anything.\n\nThanks,\nFarah",
+  "attachments": [],
+  "received_at": "2026-10-08T10:00:00+05:00",
+  "expected": {
+    "category": "shipment_status",
+    "urgency": "normal",
+    "route": "auto",
+    "fields": {
+      "container_numbers": [
+        "MSCU1234566"
+      ]
+    },
+    "must_be_null": [
+      "booking_reference"
+    ]
+  },
+  "tags": [
+    "clean"
+  ]
+}
