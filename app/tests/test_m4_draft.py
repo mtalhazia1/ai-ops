@@ -192,3 +192,30 @@ def test_failed_without_decision_is_409(api, fake_llm):
     email_id, _ = _triaged(api, fake_llm)
     api("post", f"/emails/{email_id}/status", {"status": "failed", "reason": "x"})
     assert api("post", f"/emails/{email_id}/approval", {"decision": "approved"}).status_code == 409
+
+
+def test_rejected_upload_goes_to_review_instead_of_draft(api, fake_llm):
+    payload = {**THREADED, "gmail_message_id": "m-paper", "subject": "Invoice INV-2201",
+               "attachments": [{"filename": "INV-2201.pdf", "gmail_attachment_id": "a1"},
+                               {"filename": "BL.pdf", "gmail_attachment_id": "a2"}]}
+    email_id, llm = _triaged(api, fake_llm, payload, classification={"category": "paperwork"})
+    log = lambda att, ok, resp: api("post", f"/emails/{email_id}/actions", {  # noqa: E731
+        "kind": "shipmatch_upload", "idempotency_key": f"shipmatch_upload:{email_id}:{att}", "ok": ok,
+        "request": {"filename": f"{att}.pdf"}, "response": resp})
+    log("a1", True, {"status": 201, "document_id": "doc_1"})
+    log("a2", False, {"status": 402, "detail": "plan paused"})
+    calls = len(llm.calls)
+    body = api("post", f"/emails/{email_id}/draft").json()
+    assert body["ok"] is False and body["status"] == "needs_review"
+    assert "a2.pdf: uploads paused on the ShipMatch plan (plan paused)" in body["problems"]
+    assert "Needs review" in body["review_text"]
+    assert len(llm.calls) == calls  # no draft written
+    assert Email.objects.get(pk=email_id).drafts.count() == 0
+
+
+def test_successful_or_pending_uploads_still_draft(api, fake_llm):
+    email_id, _ = _triaged(api, fake_llm, classification={"category": "paperwork"})
+    api("post", f"/emails/{email_id}/actions", {"kind": "shipmatch_upload", "idempotency_key": f"u:{email_id}:1",
+                                                 "response": {"status": 200}})
+    api("post", f"/emails/{email_id}/actions/claim", {"kind": "shipmatch_upload", "idempotency_key": f"u:{email_id}:2"})
+    assert api("post", f"/emails/{email_id}/draft").json()["ok"] is True

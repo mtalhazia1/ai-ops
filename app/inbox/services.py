@@ -84,6 +84,25 @@ def retry(email: Email) -> str:
     return mode
 
 
+UPLOAD_STATUS_TEXT = {400: "file rejected", 402: "uploads paused on the ShipMatch plan"}
+
+
+def failed_uploads(email: Email) -> list[str]:
+    """Attachments ShipMatch refused (logged by WF2 with ok=false), as readable lines."""
+    out = []
+    for action in email.actions.filter(kind="shipmatch_upload", ok=False):
+        response = action.response or {}
+        if response.get("pending") or response.get("released"):
+            continue  # an attempt in flight or freed for retry, not a refusal
+        status = response.get("status")
+        name = (action.request or {}).get("filename") or action.idempotency_key.rsplit(":", 1)[-1]
+        detail = UPLOAD_STATUS_TEXT.get(status, f"HTTP {status}")
+        if response.get("detail"):
+            detail += f" ({response['detail']})"
+        out.append(f"{name}: {detail}")
+    return out
+
+
 def lookups(email: Email) -> list[dict]:
     latest = email.actions.filter(kind="shipmatch_lookup", ok=True).order_by("-created_at", "-id").first()
     return (latest.response or {}).get("results", []) if latest else []
