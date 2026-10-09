@@ -9,6 +9,7 @@ Exported workflow JSON lives in `workflows/`. Credentials are referenced by name
 | `03_execute.json` | WF3 Execute: record decision → reply in thread → labels | Built (M4) |
 | `04_error.json` | WF4 Error handler: record failure in Django → Slack `#ops-alerts` | Built (M5) |
 | `05_digest.json` | WF5 Daily digest: 18:00 metrics summary → Slack | Built (M5) |
+| `../template/gmail-claude-slack-approval.json` | Standalone 11-node template for n8n's library (Section 18) | Built; see `template/README.md` |
 
 ## Import
 

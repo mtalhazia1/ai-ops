@@ -190,6 +190,7 @@ To run the workflows end to end without any accounts, use the mock services: see
 app/            Django project (config/, inbox/, evals/, tests/)
   inbox/llm/    client.py (Anthropic wrapper), schemas.py, prompts/, triage.py, guard.py
 n8n/workflows/  exported workflow JSON
+n8n/template/   standalone Gmail + Claude + Slack approval template for n8n's library
 docker/         Postgres init script
 scripts/        init_env, import_workflows, backup, restore
 docs/           architecture, deploy guide, case study, demo script, screenshots

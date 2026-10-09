@@ -247,6 +247,13 @@ def draft_email(request, email_id: int):
         # stays with the reviewer (the dashboard can re-draft).
         if email.status != Status.TRIAGED:
             raise state.InvalidTransition(email.status, Status.AWAITING_APPROVAL)
+        rejected = services.failed_uploads(email)
+        if rejected:
+            # Don't tell the sender "documents received" when ShipMatch refused them.
+            reason = "ShipMatch did not accept: " + "; ".join(rejected)
+            state.transition(email, Status.NEEDS_REVIEW, reason=reason[:1000])
+            return {"id": email.id, "status": email.status, "rerun": False, "ok": False, "problems": reason,
+                    "review_text": process.review_text(email, reason), "dashboard_url": process.dashboard_url(email)}
         draft = services.create_draft(email)
         if draft.ok:
             state.transition(email, Status.AWAITING_APPROVAL)

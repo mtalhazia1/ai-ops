@@ -53,8 +53,11 @@ def _done_email(api, fake_llm, edited=False, received_minutes_ago=30, gid="g"):
 def test_metrics_for_a_day(api, fake_llm):
     _done_email(api, fake_llm, gid="a", received_minutes_ago=30)
     _done_email(api, fake_llm, edited=True, gid="b", received_minutes_ago=10)
-    review_id, _ = _triaged(api, fake_llm, {**PAYLOAD, "gmail_message_id": "c"}, classification={"category": "other"})
-    inj_id, _ = _triaged(api, fake_llm, {**PAYLOAD, "gmail_message_id": "d"}, classification={"contains_instructions_to_ai": True})
+    now = timezone.now().isoformat()  # "today" must not depend on when the suite runs
+    review_id, _ = _triaged(api, fake_llm, {**PAYLOAD, "gmail_message_id": "c", "date": now},
+                            classification={"category": "other"})
+    inj_id, _ = _triaged(api, fake_llm, {**PAYLOAD, "gmail_message_id": "d", "date": now},
+                         classification={"contains_instructions_to_ai": True})
     api("post", "/failures", {"workflow": "WF2", "node": "x", "error": "y"})
     m = metrics.compute("today")
     assert m["handled"] == 4
