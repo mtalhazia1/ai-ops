@@ -65,7 +65,12 @@ def send_decision(email: Email, *, decision: str, reviewer: str, final_body: str
 
 def retry(email: Email) -> str:
     """Retry a failed email. With a decision already made, resume at sending (WF3);
-    otherwise start WF2 again (it reuses the saved triage). Returns which one ran."""
+    otherwise start WF2 again (it reuses the saved triage). Returns which one ran.
+
+    If n8n can't be reached the email stays retryable: in send mode it is still `failed`
+    (WF3 moves it to `approved`); in process mode it is moved back from `received` to
+    `failed`. (n8n is called after the commit, not inside the transaction, so WF2 never
+    reads the email before it is `received`.)"""
     latest = email.approvals.order_by("-decided_at", "-id").first()
     if latest and latest.decision != "rejected":
         with transaction.atomic():
@@ -79,10 +84,24 @@ def retry(email: Email) -> str:
         with transaction.atomic():
             release_pending_claims(email)
             state.transition(email, Status.RECEIVED)
-        call_n8n(settings.N8N_PROCESS_WEBHOOK_URL, {"email_id": email.id})
+        try:
+            call_n8n(settings.N8N_PROCESS_WEBHOOK_URL, {"email_id": email.id})
+        except Exception:
+            _back_to_failed(email)
+            raise
         mode = "process"
     Failure.objects.filter(email=email, resolved=False).update(resolved=True, retried_at=timezone.now())
     return mode
+
+
+def _back_to_failed(email: Email) -> None:
+    """Undo Retry's failed → received after n8n couldn't be called, unless a WF2 run did
+    start after all and has already moved the email on."""
+    with transaction.atomic():
+        locked = Email.objects.select_for_update().get(pk=email.pk)
+        if locked.status == Status.RECEIVED:
+            state.transition(locked, Status.FAILED)
+    email.refresh_from_db()
 
 
 # The statuses ShipMatch documents as a refusal (Section 10). Anything else that isn't
