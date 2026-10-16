@@ -99,6 +99,7 @@ def email_detail(request, pk):
         "can_decide": email.status in DECIDABLE,
         "can_edit": email.status in DECIDABLE | {Status.FAILED},
         "can_redraft": email.status in DECIDABLE and triage_row is not None,
+        "reply_uncertain": email.status == Status.FAILED and services.reply_may_have_been_sent(email),
         "timeline": _timeline(email),
     })
 
@@ -227,12 +228,39 @@ def retry_email(request, pk):
         return redirect(request.POST.get("next") or "inbox:failures")
     try:
         mode = services.retry(email)
+    except services.ReplyMaybeSent:
+        messages.error(request, f"Not retried: the {services.REPLY_UNCERTAIN_REASON}. "
+                                "Open the email and choose “Mark as sent” or “Send again anyway”.")
+        return redirect("inbox:email_detail", pk=pk)
     except (services.N8nError, state.InvalidTransition) as exc:
         messages.error(request, f"Retry failed: {exc}")
     else:
         messages.success(request, f"Retrying email #{email.id}: " + (
             "resuming at sending the approved reply." if mode == "send" else "running the process workflow again."))
     return redirect(request.POST.get("next") or "inbox:failures")
+
+
+@login_required
+@require_POST
+def resolve_reply(request, pk):
+    """A send whose result was never logged: the reviewer checked the Gmail thread and
+    either confirms the reply is there ("sent") or asks for one more send ("resend")."""
+    email = get_object_or_404(Email, pk=pk)
+    user = request.user.get_username()
+    try:
+        if request.POST.get("action") == "sent":
+            services.mark_reply_sent(email, user=user)
+            messages.success(request, "Marked as sent. No reply was sent now.")
+        elif request.POST.get("action") == "resend":
+            services.send_again(email, user=user)
+            messages.success(request, "Sending the approved reply again.")
+        else:
+            raise Http404
+    except state.InvalidTransition:
+        messages.error(request, "Nothing to resolve: this email has no unconfirmed send.")
+    except services.N8nError as exc:
+        messages.error(request, f"Could not reach n8n: {exc}. Use Retry once n8n is back.")
+    return redirect("inbox:email_detail", pk=pk)
 
 
 @login_required

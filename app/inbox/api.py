@@ -463,6 +463,10 @@ def claim_action(request, email_id: int, payload: ClaimIn):
     done=true: it already succeeded; `response` holds the saved result.
     Both false: another run holds a fresh claim; skip.
     A failed attempt, or a claim older than 10 minutes (a crashed run), can be re-claimed.
+
+    Except `reply_sent`: a claim that never logged its result (crashed run, recorded
+    failure) may stand for a reply Gmail already sent, so it is never re-claimed. The email
+    goes to `failed` with that reason (`uncertain: true`) and a human decides in the dashboard.
     """
     email = get_object_or_404(Email, pk=email_id)
     if payload.kind not in {k for k, _ in Action.KINDS}:
@@ -483,9 +487,19 @@ def claim_action(request, email_id: int, payload: ClaimIn):
         claimed_at = action.response.get("claimed_at") if action.response.get("pending") else None
         if claimed_at and now - datetime.fromisoformat(claimed_at) < CLAIM_TTL:
             return {"proceed": False, "done": False, "response": {}}
+        if action.kind == "reply_sent" and services.reply_unresolved(action):
+            action.response = {"uncertain": True, "claimed_at": action.response.get("claimed_at")}
+            action.save(update_fields=["response"])
+            _fail_reply_uncertain(action.email)
+            return {"proceed": False, "done": False, "uncertain": True, "response": {}}
         action.response, action.ok = pending, False
         action.save(update_fields=["response", "ok"])
     return {"proceed": True, "done": False, "response": {}}
+
+
+def _fail_reply_uncertain(email: Email) -> None:
+    if state.can_transition(Email.objects.get(pk=email.pk).status, Status.FAILED):
+        state.transition(email, Status.FAILED, reason=services.REPLY_UNCERTAIN_REASON)
 
 
 @api.post("/emails/{email_id}/actions")
@@ -545,7 +559,10 @@ def record_failure(request, payload: FailureIn):
     if email:
         release_pending_claims(email)
     if email and state.can_transition(email.status, Status.FAILED):
-        state.transition(email, Status.FAILED, reason=f"{payload.workflow} failed at {payload.node}: {payload.error}"[:1000])
+        reason = f"{payload.workflow} failed at {payload.node}: {payload.error}"
+        if services.reply_may_have_been_sent(email):
+            reason = f"{services.REPLY_UNCERTAIN_REASON} ({reason})"
+        state.transition(email, Status.FAILED, reason=reason[:1000])
     link = process.dashboard_url(email) if email else f"{settings.DASHBOARD_BASE_URL.rstrip('/')}/failures/"
     alert = (f":warning: *{process.slack_escape(payload.workflow or 'Workflow')}* failed at "
              f"*{process.slack_escape(payload.node or '?')}*: {process.slack_escape(payload.error[:300])}\n"

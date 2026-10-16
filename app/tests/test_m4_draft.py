@@ -180,12 +180,12 @@ def test_reply_goes_to_reply_to(api, fake_llm):
 
 
 def test_send_failure_resumes_at_sending(api, fake_llm):
+    """A failure before the send was claimed (e.g. at /approval or the claim itself):
+    nothing can have gone out, so the resumed WF3 run sends."""
     email_id = _awaiting(api, fake_llm)
     api("post", f"/emails/{email_id}/approval", {"decision": "approved"})
     key = f"reply_sent:{email_id}"
-    api("post", f"/emails/{email_id}/actions/claim", {"kind": "reply_sent", "idempotency_key": key})
-    # WF4 records the Gmail failure: email failed, claim released
-    api("post", "/failures", {"workflow": "WF3 Execute", "node": "Gmail send reply", "error": "503", "email_id": email_id})
+    api("post", "/failures", {"workflow": "WF3 Execute", "node": "Claim reply", "error": "503", "email_id": email_id})
     retry = api("post", f"/emails/{email_id}/approval", {"decision": "approved"}).json()
     assert retry["status"] == "approved" and retry["rerun"] is True and retry["raw"]
     assert api("post", f"/emails/{email_id}/actions/claim", {"kind": "reply_sent", "idempotency_key": key}).json()["proceed"]

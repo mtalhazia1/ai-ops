@@ -11,7 +11,14 @@
 
 <div class="grid">
 <section>
-  {% if email.status == "failed" %}
+  {% if reply_uncertain %}
+  <p class="callout bad"><strong>The reply may already have been sent.</strong> A send was started but its result was never recorded. Open the Gmail thread and check before doing anything.</p>
+  <form method="post" action="{% url 'inbox:resolve_reply' email.pk %}" class="inline">{% csrf_token %}
+    <button type="submit" name="action" value="sent" class="primary">Mark as sent</button>
+    <button type="submit" name="action" value="resend" class="danger">Send again anyway</button>
+    <span class="muted">“Mark as sent” closes the email without sending. “Send again anyway” sends the approved reply once more.</span>
+  </form>
+  {% elif email.status == "failed" %}
   <form method="post" action="{% url 'inbox:retry' email.pk %}" class="inline">{% csrf_token %}
     <input type="hidden" name="next" value="{{ request.path }}">
     <button type="submit">Retry</button> <span class="muted">Resumes at sending if a reply was already approved; otherwise runs the process workflow again.</span>

@@ -24,15 +24,52 @@ class N8nError(Exception):
     pass
 
 
+# A `reply_sent` claim that never got its result logged is not "free to repeat": Gmail
+# may have sent the reply before the run died. Only a human (dashboard "Mark as sent" /
+# "Send again anyway") settles it; nothing releases it or lets it expire into a re-send.
+REPLY_UNCERTAIN_REASON = "reply may already have been sent — check the Gmail thread before resending"
+
+
+def _reply_key(email: Email) -> str:
+    return f"reply_sent:{email.id}"
+
+
 def release_pending_claims(email: Email) -> int:
-    """A failed run never finishes its claimed actions; free them so a retry repeats them."""
+    """A failed run never finishes its claimed actions; free them so a retry repeats them.
+    A pending `reply_sent` claim is marked uncertain instead (see REPLY_UNCERTAIN_REASON)."""
     released = 0
     for action in Action.objects.filter(email=email, ok=False):
-        if action.response.get("pending"):
+        if not action.response.get("pending"):
+            continue
+        if action.kind == "reply_sent":
+            action.response = {"uncertain": True, "claimed_at": action.response.get("claimed_at")}
+        else:
             action.response = {"released": True, "claimed_at": action.response.get("claimed_at")}
-            action.save(update_fields=["response"])
             released += 1
+        action.save(update_fields=["response"])
     return released
+
+
+def reply_unresolved(action: Action | None) -> bool:
+    """True when this `reply_sent` row may stand for a reply Gmail already sent: claimed
+    (pending, crashed or failed) but never logged. A logged failure (ok=False without these
+    markers) or a human's "Send again anyway" is a definite "not sent"."""
+    if action is None or action.ok:
+        return False
+    response = action.response or {}
+    return bool(response.get("pending") or response.get("uncertain") or response.get("released"))
+
+
+def reply_action(email: Email) -> Action | None:
+    return Action.objects.filter(idempotency_key=_reply_key(email)).first()
+
+
+def reply_may_have_been_sent(email: Email) -> bool:
+    return reply_unresolved(reply_action(email))
+
+
+class ReplyMaybeSent(Exception):
+    pass
 
 
 def call_n8n(url: str, payload: dict) -> None:
@@ -70,11 +107,16 @@ def retry(email: Email) -> str:
     If n8n can't be reached the email stays retryable: in send mode it is still `failed`
     (WF3 moves it to `approved`); in process mode it is moved back from `received` to
     `failed`. (n8n is called after the commit, not inside the transaction, so WF2 never
-    reads the email before it is `received`.)"""
+    reads the email before it is `received`.)
+
+    Raises ReplyMaybeSent when an earlier send attempt never logged its result: a human
+    has to check the Gmail thread and use "Mark as sent" or "Send again anyway"."""
     latest = email.approvals.order_by("-decided_at", "-id").first()
     if latest and latest.decision != "rejected":
         with transaction.atomic():
             release_pending_claims(email)
+        if reply_may_have_been_sent(email):
+            raise ReplyMaybeSent(REPLY_UNCERTAIN_REASON)
         call_n8n(settings.N8N_EXECUTE_WEBHOOK_URL, {
             "email_id": email.id, "decision": "approved", "reviewer": latest.reviewer,
             "channel": latest.channel, "final_body": "",
@@ -102,6 +144,36 @@ def _back_to_failed(email: Email) -> None:
         if locked.status == Status.RECEIVED:
             state.transition(locked, Status.FAILED)
     email.refresh_from_db()
+
+
+def mark_reply_sent(email: Email, *, user: str) -> None:
+    """A human checked the Gmail thread and the reply is there: record it and close the email."""
+    with transaction.atomic():
+        locked = Email.objects.select_for_update().get(pk=email.pk)
+        action = Action.objects.select_for_update().filter(idempotency_key=_reply_key(locked)).first()
+        if locked.status != Status.FAILED or not reply_unresolved(action):
+            raise state.InvalidTransition(locked.status, Status.DONE)
+        action.response = {"marked_sent_by": user, "marked_at": timezone.now().isoformat(),
+                            "claimed_at": action.response.get("claimed_at")}
+        action.ok = True
+        action.save(update_fields=["response", "ok"])
+        # failed → approved → done: the decision was made before, the reply is out.
+        state.transition(locked, Status.APPROVED)
+        state.transition(locked, Status.DONE)
+        Failure.objects.filter(email=locked, resolved=False).update(resolved=True)
+    email.refresh_from_db()
+
+
+def send_again(email: Email, *, user: str) -> str:
+    """A human checked the Gmail thread and the reply is not there: allow one more send."""
+    with transaction.atomic():
+        locked = Email.objects.select_for_update().get(pk=email.pk)
+        action = Action.objects.select_for_update().filter(idempotency_key=_reply_key(locked)).first()
+        if locked.status != Status.FAILED or not reply_unresolved(action):
+            raise state.InvalidTransition(locked.status, Status.APPROVED)
+        action.response = {"resend_allowed_by": user, "allowed_at": timezone.now().isoformat()}
+        action.save(update_fields=["response"])
+    return retry(email)
 
 
 # The statuses ShipMatch documents as a refusal (Section 10). Anything else that isn't
