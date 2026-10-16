@@ -5,7 +5,7 @@ x-n8n-env: &n8n-env
   N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
   N8N_HOST: ${N8N_HOST:-localhost}
   N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
-  N8N_WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+  WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
   GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Asia/Karachi}
   TZ: ${GENERIC_TIMEZONE:-Asia/Karachi}
   EXECUTIONS_MODE: ${EXECUTIONS_MODE:-queue}
