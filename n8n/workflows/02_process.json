@@ -2062,7 +2062,8 @@
             "decision": "approved",
             "reviewer": "slack",
             "channel": "slack",
-            "final_body": ""
+            "final_body": "",
+            "draft_id": "={{ $('Draft (Django)').item.json.draft_id }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -2105,6 +2106,15 @@
             {
               "id": "final_body",
               "displayName": "final_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "draft_id",
+              "displayName": "draft_id",
               "required": false,
               "defaultMatch": false,
               "display": true,

@@ -24,6 +24,10 @@
             {
               "name": "final_body",
               "type": "string"
+            },
+            {
+              "name": "draft_id",
+              "type": "string"
             }
           ]
         }
@@ -130,6 +134,12 @@
               "name": "final_body",
               "value": "={{ $json.final_body ?? $json.body.final_body ?? '' }}",
               "type": "string"
+            },
+            {
+              "id": "cb4e0aff-1be6-5ea1-811b-564d25faebd7",
+              "name": "draft_id",
+              "value": "={{ String($json.draft_id ?? ($json.body || {}).draft_id ?? '') }}",
+              "type": "string"
             }
           ]
         },
@@ -170,7 +180,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify(Object.assign({ decision: $json.decision, reviewer: $json.reviewer, channel: $json.channel }, $json.final_body ? { final_body: $json.final_body } : {})) }}"
+        "jsonBody": "={{ JSON.stringify(Object.assign({ decision: $json.decision, reviewer: $json.reviewer, channel: $json.channel }, $json.final_body ? { final_body: $json.final_body } : {}, $json.draft_id ? { draft_id: Number($json.draft_id) } : {})) }}"
       },
       "id": "d2429ef0-ab62-5fb6-af60-a0636e49b0b7",
       "name": "Record decision (Django)",

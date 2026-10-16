@@ -252,6 +252,7 @@ def _draft_out(email: Email, draft: Draft, *, rerun: bool) -> dict[str, Any]:
         "status": email.status,
         "rerun": rerun,
         "ok": draft.ok,
+        "draft_id": draft.id,
         "subject": draft.subject,
         "body": draft.body,
         "asks_for": draft.asks_for,
@@ -308,6 +309,13 @@ class ApprovalIn(Schema):
     reviewer: str = ""
     channel: str = "slack"
     final_body: Optional[str] = None
+    # The draft the approver was shown (WF2 puts it on the Slack approval card). When it is
+    # no longer the latest draft, the approval is refused instead of sending text nobody saw.
+    draft_id: Optional[int] = None
+
+
+STALE_DRAFT_REASON = ("Slack approval was for an older draft: the draft was re-done after the approval card "
+                      "was posted. Check the new draft in the dashboard.")
 
 
 def _approval_out(email: Email, approval: Approval, *, rerun: bool) -> dict[str, Any]:
@@ -331,7 +339,10 @@ def _approval_out(email: Email, approval: Approval, *, rerun: bool) -> dict[str,
 @api.post("/emails/{email_id}/approval")
 def record_approval(request, email_id: int, payload: ApprovalIn):
     """Record a human decision. Repeating the same decision returns it again
-    (`rerun: true`) so WF3 can finish after a crash; anything else is 409."""
+    (`rerun: true`) so WF3 can finish after a crash; anything else is 409.
+
+    An approval that names a `draft_id` (Slack) is only accepted while that draft is still
+    the latest one; otherwise 409 `stale_draft` and the email goes to review."""
     if payload.decision not in ("approved", "edited", "rejected"):
         return api.create_response(request, {"detail": "decision must be approved, edited or rejected"}, status=422)
     if payload.channel not in ("slack", "dashboard"):
@@ -347,6 +358,13 @@ def record_approval(request, email_id: int, payload: ApprovalIn):
             decision, body = payload.decision, ""
             if not rejecting:
                 draft = email.latest_draft
+                if payload.draft_id is not None and (draft is None or draft.id != payload.draft_id):
+                    if email.status == Status.AWAITING_APPROVAL:
+                        state.transition(email, Status.NEEDS_REVIEW, reason=STALE_DRAFT_REASON)
+                    return api.create_response(request, {
+                        "detail": STALE_DRAFT_REASON, "stale_draft": True, "current": email.status,
+                        "approved_draft_id": payload.draft_id, "latest_draft_id": draft.id if draft else None,
+                    }, status=409)
                 draft_body = draft.body if draft and draft.ok else ""
                 body = (payload.final_body or "").strip() or draft_body
                 if not body:
