@@ -191,9 +191,15 @@ def redraft(request, pk):
     if email.latest_triage.category == Category.OTHER:
         messages.error(request, "Set a category first; there is no reply template for “other”.")
         return redirect("inbox:email_detail", pk=pk)
-    draft = services.create_draft(email)
+    try:
+        draft = services.create_draft(email)
+    except services.UploadsNotFinished as exc:
+        messages.error(request, f"Not re-drafted: {exc}. Try again once the upload is done.")
+        return redirect("inbox:email_detail", pk=pk)
     if draft.ok:
         messages.success(request, "New draft ready below.")
+    elif draft.blocked_reason.startswith(services.UPLOAD_REFUSED_PREFIX):
+        messages.error(request, f"No AI draft: {draft.blocked_reason}. Write the reply yourself.")
     else:
         messages.error(request, f"The new draft fails the checks ({draft.blocked_reason}). Edit it before sending.")
     return redirect("inbox:email_detail", pk=pk)

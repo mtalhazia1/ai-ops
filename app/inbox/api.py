@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any, Optional
 
@@ -243,20 +243,29 @@ def draft_email(request, email_id: int):
         existing = email.latest_draft
         if email.status in (Status.AWAITING_APPROVAL, Status.APPROVED, Status.DONE) and existing and existing.ok:
             return _draft_out(email, existing, rerun=True)
+        # A repeat after the draft was blocked (failed checks, or ShipMatch refused the
+        # paperwork) gives the same answer, so WF2's review branch runs again.
+        if email.status == Status.NEEDS_REVIEW and existing and not existing.ok:
+            return _draft_out(email, existing, rerun=True)
         # Only freshly triaged emails are drafted automatically. Anything in review
         # stays with the reviewer (the dashboard can re-draft).
         if email.status != Status.TRIAGED:
             raise state.InvalidTransition(email.status, Status.AWAITING_APPROVAL)
-        rejected = services.failed_uploads(email)
-        if rejected:
-            # Don't tell the sender "documents received" when ShipMatch refused them.
-            reason = "ShipMatch did not accept: " + "; ".join(rejected)
-            state.transition(email, Status.NEEDS_REVIEW, reason=reason[:1000])
-            return {"id": email.id, "status": email.status, "rerun": False, "ok": False, "problems": reason,
-                    "review_text": process.review_text(email, reason), "dashboard_url": process.dashboard_url(email)}
-        draft = services.create_draft(email)
+        try:
+            draft = services.create_draft(email)
+        except services.UploadsNotFinished as exc:
+            out = {"id": email.id, "status": email.status, "rerun": False, "ok": False, "problems": str(exc),
+                   "dashboard_url": process.dashboard_url(email)}
+            if exc.in_progress:
+                # Another WF2 run is still uploading; it drafts when it is done. WF2 stops quietly.
+                return {**out, "pending": True}
+            # The upload failed (429/5xx) or was abandoned: WF2 fails the run so WF4 records
+            # a failure and Retry repeats the upload.
+            return api.create_response(request, {**out, "retry": True, "detail": str(exc)}, status=503)
         if draft.ok:
             state.transition(email, Status.AWAITING_APPROVAL)
+        elif draft.blocked_reason.startswith(services.UPLOAD_REFUSED_PREFIX):
+            state.transition(email, Status.NEEDS_REVIEW, reason=draft.blocked_reason)
         else:
             state.transition(email, Status.NEEDS_REVIEW, reason=f"draft blocked: {draft.blocked_reason}"[:1000])
     return _draft_out(email, draft, rerun=False)
@@ -388,7 +397,7 @@ class ClaimIn(Schema):
     idempotency_key: str
 
 
-CLAIM_TTL = timedelta(minutes=10)
+CLAIM_TTL = services.CLAIM_TTL
 
 
 @api.post("/emails/{email_id}/actions/claim")

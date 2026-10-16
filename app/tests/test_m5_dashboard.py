@@ -93,6 +93,33 @@ def test_redraft_from_dashboard(admin_client, api, fake_llm):
     assert email.drafts.count() == 1 and email.status == "needs_review"  # still with the reviewer
 
 
+def _log_upload(api, email_id, att, ok, response):
+    api("post", f"/emails/{email_id}/actions", {"kind": "shipmatch_upload", "idempotency_key": f"shipmatch_upload:{email_id}:{att}",
+                                                 "ok": ok, "request": {"filename": f"{att}.pdf"}, "response": response})
+
+
+def test_redraft_from_dashboard_respects_refused_upload(admin_client, api, fake_llm):
+    """The dashboard Re-draft goes through the same upload guard as WF2's /draft."""
+    email_id = _awaiting(api, fake_llm)  # an ok "documents received"-style draft is waiting
+    _log_upload(api, email_id, "a1", False, {"status": 400, "detail": "corrupt"})
+    llm = fake_llm()
+    page = admin_client.post(f"/emails/{email_id}/redraft/", follow=True).content.decode()
+    assert "No AI draft: ShipMatch did not accept: a1.pdf: file rejected (corrupt)" in page
+    email = Email.objects.get(pk=email_id)
+    assert email.latest_draft.ok is False and email.latest_draft.body == "" and llm.calls == []
+    # approving without writing a reply is refused: the old draft can no longer be sent
+    assert api("post", f"/emails/{email_id}/approval", {"decision": "approved"}).status_code == 422
+
+
+def test_redraft_from_dashboard_waits_for_upload_in_flight(admin_client, api, fake_llm):
+    email_id = _awaiting(api, fake_llm)
+    api("post", f"/emails/{email_id}/actions/claim", {"kind": "shipmatch_upload", "idempotency_key": f"shipmatch_upload:{email_id}:a1"})
+    drafts = Email.objects.get(pk=email_id).drafts.count()
+    page = admin_client.post(f"/emails/{email_id}/redraft/", follow=True).content.decode()
+    assert "Not re-drafted: ShipMatch upload not finished" in page
+    assert Email.objects.get(pk=email_id).drafts.count() == drafts
+
+
 def test_detail_page_shows_workspace(admin_client, api, fake_llm):
     email_id = _awaiting(api, fake_llm)
     page = admin_client.get(f"/emails/{email_id}/").content.decode()

@@ -1435,7 +1435,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3080,
+        3300,
         760
       ],
       "retryOnFail": true,
@@ -1757,7 +1757,7 @@
           "conditions": [
             {
               "id": "369b0dd1-caea-5af5-a171-33d0a4c9749a",
-              "leftValue": "={{ $json.ok === false }}",
+              "leftValue": "={{ $json.ok === false && $json.pending !== true && $json.retry !== true }}",
               "operator": {
                 "type": "boolean",
                 "operation": "true",
@@ -2282,6 +2282,111 @@
         6420,
         560
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8451808f-0551-5c48-813c-53c0b4eb147f",
+              "leftValue": "={{ [200, 201, 400, 402].includes($json.statusCode) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "611a109c-df97-50df-b8fc-30569f34203b",
+      "name": "Upload answered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=ShipMatch upload failed (HTTP {{ $json.statusCode }}) for {{ $('One item per attachment').item.json.filename }}; Retry repeats it"
+      },
+      "id": "2eadb7a5-bc0a-5d05-8204-ed181f6acfa6",
+      "name": "ShipMatch upload failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        3300,
+        900
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f51509bb-4532-5871-8b95-62e790a77466",
+      "name": "Uploads finished",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        3520,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a57752ec-71cf-54a5-9f09-52da4961fba4",
+              "leftValue": "={{ $json.retry === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e4d41b68-2e72-5b37-bf5e-c081d62645d4",
+      "name": "Draft not ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4880,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Draft not ready: {{ $json.detail }}"
+      },
+      "id": "32489683-4f3f-59b4-810f-b66479d97bfb",
+      "name": "Draft not ready",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        5100,
+        640
+      ]
     }
   ],
   "connections": {
@@ -2765,7 +2870,7 @@
         ],
         [
           {
-            "node": "Ready for draft",
+            "node": "Uploads finished",
             "type": "main",
             "index": 0
           }
@@ -2809,7 +2914,7 @@
       "main": [
         [
           {
-            "node": "Log upload",
+            "node": "Upload answered?",
             "type": "main",
             "index": 0
           }
@@ -2922,9 +3027,9 @@
       "main": [
         [
           {
-            "node": "Ready for draft",
+            "node": "Uploads finished",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -2985,6 +3090,13 @@
         [
           {
             "node": "Review text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Draft not ready?",
             "type": "main",
             "index": 0
           }
@@ -3105,6 +3217,46 @@
         [
           {
             "node": "Review text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload answered?": {
+      "main": [
+        [
+          {
+            "node": "Log upload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ShipMatch upload failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uploads finished": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft not ready?": {
+      "main": [
+        [
+          {
+            "node": "Draft not ready",
             "type": "main",
             "index": 0
           }

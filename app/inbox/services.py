@@ -7,13 +7,14 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
 from . import state
-from .llm.draft import DraftInput, PlaybookData, draft_reply
+from .llm.draft import DraftInput, PlaybookData, draft_reply, reply_subject
 from .models import Action, Draft, Email, Failure, Playbook, Status
 
 logger = logging.getLogger(__name__)
@@ -84,23 +85,59 @@ def retry(email: Email) -> str:
     return mode
 
 
-UPLOAD_STATUS_TEXT = {400: "file rejected", 402: "uploads paused on the ShipMatch plan"}
+# The statuses ShipMatch documents as a refusal (Section 10). Anything else that isn't
+# 200/201 (429, 5xx, no answer) is transient: WF2 fails the run so Retry repeats the upload.
+UPLOAD_REFUSALS = {400: "file rejected", 402: "uploads paused on the ShipMatch plan"}
+UPLOAD_REFUSED_PREFIX = "ShipMatch did not accept: "
+CLAIM_TTL = timedelta(minutes=10)
 
 
-def failed_uploads(email: Email) -> list[str]:
-    """Attachments ShipMatch refused (logged by WF2 with ok=false), as readable lines."""
-    out = []
-    for action in email.actions.filter(kind="shipmatch_upload", ok=False):
+class UploadsNotFinished(Exception):
+    """An attachment's ShipMatch upload has no final answer yet, so a "documents received"
+    reply can't be written. `in_progress`: another run holds a fresh claim and drafts once
+    it is done; otherwise the upload failed or was abandoned and the run should fail (Retry)."""
+
+    def __init__(self, message: str, *, in_progress: bool):
+        super().__init__(message)
+        self.in_progress = in_progress
+
+
+def _attachment_name(email: Email, action: Action) -> str:
+    name = (action.request or {}).get("filename")
+    if name:
+        return name
+    attachment_id = action.idempotency_key.rsplit(":", 1)[-1]
+    for a in email.attachments or []:
+        if a.get("gmail_attachment_id") == attachment_id and a.get("filename"):
+            return a["filename"]
+    return "an attachment"
+
+
+def upload_problems(email: Email) -> tuple[list[str], list[str], list[str]]:
+    """ShipMatch uploads without a successful result, as readable lines in a fixed order:
+    (refused by ShipMatch, in progress in another run, failed or abandoned)."""
+    refused, in_progress, unfinished = [], [], []
+    now = timezone.now()
+    for action in email.actions.filter(kind="shipmatch_upload", ok=False).order_by("created_at", "id"):
         response = action.response or {}
-        if response.get("pending") or response.get("released"):
-            continue  # an attempt in flight or freed for retry, not a refusal
-        status = response.get("status")
-        name = (action.request or {}).get("filename") or action.idempotency_key.rsplit(":", 1)[-1]
-        detail = UPLOAD_STATUS_TEXT.get(status, f"HTTP {status}")
-        if response.get("detail"):
-            detail += f" ({response['detail']})"
-        out.append(f"{name}: {detail}")
-    return out
+        name = _attachment_name(email, action)
+        if response.get("pending"):
+            claimed_at = response.get("claimed_at")
+            if claimed_at and now - datetime.fromisoformat(claimed_at) < CLAIM_TTL:
+                in_progress.append(f"{name}: upload in progress")
+            else:
+                unfinished.append(f"{name}: upload never finished")
+        elif response.get("released"):
+            unfinished.append(f"{name}: upload not repeated after a failed run")
+        elif response.get("status") in UPLOAD_REFUSALS:
+            detail = UPLOAD_REFUSALS[response["status"]]
+            if response.get("detail"):
+                detail += f" ({response['detail']})"
+            refused.append(f"{name}: {detail}")
+        else:
+            status = response.get("status")
+            unfinished.append(f"{name}: upload failed ({f'HTTP {status}' if status else 'no response recorded'})")
+    return refused, in_progress, unfinished
 
 
 def lookups(email: Email) -> list[dict]:
@@ -110,7 +147,21 @@ def lookups(email: Email) -> list[dict]:
 
 def create_draft(email: Email) -> Draft:
     """Draft a reply from the latest triage and the playbook; saves and returns the Draft.
-    Status changes are the caller's business."""
+    Status changes are the caller's business.
+
+    Every draft path (WF2's /draft, the dashboard's Re-draft) comes through here, so the
+    ShipMatch upload guard applies to all of them:
+    - an upload ShipMatch refused: no AI call; a blocked Draft with the reason is saved, so
+      the reviewer writes the reply instead of approving "documents received";
+    - an upload in flight, failed or abandoned: raises UploadsNotFinished.
+    """
+    refused, in_progress, unfinished = upload_problems(email)
+    if refused:
+        return Draft.objects.create(email=email, subject=reply_subject(email.subject), body="", ok=False,
+                                    blocked_reason=(UPLOAD_REFUSED_PREFIX + "; ".join(refused))[:1000])
+    if in_progress or unfinished:
+        raise UploadsNotFinished("ShipMatch upload not finished: " + "; ".join(unfinished + in_progress),
+                                 in_progress=not unfinished)
     triage_row = email.latest_triage
     result = draft_reply(
         DraftInput(
