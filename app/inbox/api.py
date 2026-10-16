@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import re
 from datetime import datetime
+from datetime import timezone as dt_timezone
 from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any, Optional
 
@@ -103,7 +104,9 @@ def _parse_date(value: Optional[str]) -> datetime:
         except (TypeError, ValueError):
             return timezone.now()
     if timezone.is_naive(parsed):
-        parsed = timezone.make_aware(parsed, timezone.utc)
+        # No zone (or "-0000", which parsedate_to_datetime returns naive): treat as UTC.
+        # django.utils.timezone.utc was removed in Django 5.0.
+        parsed = parsed.replace(tzinfo=dt_timezone.utc)
     return parsed
 
 

@@ -46,3 +46,21 @@ def test_html_only_email(api):
 
 def test_intake_requires_token(api):
     assert api("post", "/emails", PAYLOAD, token=None).status_code == 401
+
+
+def test_date_header_minus_0000_is_utc(api):
+    response = api("post", "/emails", {**PAYLOAD, "date": "Thu, 08 Oct 2026 10:00:00 -0000"})
+    assert response.status_code == 200
+    assert Email.objects.get().received_at.isoformat() == "2026-10-08T10:00:00+00:00"
+
+
+def test_naive_iso_date_is_utc(api):
+    response = api("post", "/emails", {**PAYLOAD, "date": "2026-10-08T10:00:00"})
+    assert response.status_code == 200
+    assert Email.objects.get().received_at.isoformat() == "2026-10-08T10:00:00+00:00"
+
+
+def test_unparseable_date_falls_back_to_now(api):
+    response = api("post", "/emails", {**PAYLOAD, "date": "not a date"})
+    assert response.status_code == 200
+    assert Email.objects.get().received_at is not None
