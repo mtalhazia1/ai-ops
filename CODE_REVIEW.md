@@ -44,3 +44,31 @@ Not yet verified:
 - The WF2 change (#3, #5) imports cleanly into n8n 2.43.2, but no workflow has been run end to end.
   `dev/mocks/mock_services.py` always accepts uploads, so it can't simulate a refusal (402) or an outage (503) yet.
 - `scripts/import_workflows.sh` still hides the output of `dc restart`.
+
+---
+
+# Second review (full codebase) — 2026-10-16
+
+Scope: full current contents of `app/inbox`, `app/config`, all five `n8n/workflows`, `docker-compose.yml`,
+`docker/`, `scripts/init_env.sh`, `scripts/restore.sh`, on branch `fix/code-review-2026-10-16`.
+Findings were reasoned from the code, not reproduced; #11, #12, #13, #19 and #20 were spot-checked by reading the code.
+
+| # | Severity | File | Issue |
+|---|---|---|---|
+| 11 | Medium | `app/inbox/cleaning.py:41` | A quote request laid out as `From: Lahore / To: Karachi / ... / Pickup date:` is mistaken for an Outlook quoted-reply header and cut off, so the lane details are lost and the draft asks for details the customer already gave. |
+| 12 | High | `app/inbox/api.py:106` | `timezone.utc` no longer exists in Django 5.x. Any email whose Date header has no time zone (or `-0000`) makes intake return 500, and the email is never saved. |
+| 13 | Medium | `app/inbox/services.py:81` | Retry moves the email from `failed` to `received` before calling n8n. If n8n is down, the email is stuck in `received` for good: no Retry button, not in the review queue. |
+| 14 | Medium | `n8n/workflows/02_process.json:1684` | A 5xx/409 from `/draft` ends WF2 as a "success": no failure recorded, no alert, and the email sits in `triaged`, which isn't in the review queue. |
+| 15 | Medium | `n8n/workflows/03_execute.json:154` | Any error from `/approval` (422/409/500) goes to an "already decided" no-op, so an approval can be silently dropped. `Mark done` has the same problem. |
+| 16 | Medium | `app/inbox/api.py:318` | Slack Approve sends whatever the latest draft is at click time. If someone re-drafted in the dashboard meanwhile, the customer gets a reply nobody approved in Slack. |
+| 17 | Low | `app/inbox/metrics.py:46` | An email that ever failed (even once, then retried and sent unchanged) is counted as "reviewed", not "automatic", so the dashboard and daily digest are skewed. |
+| 18 | High | `app/inbox/api.py:491` | Recording a failure frees the `reply_sent` claim. If Gmail sent the reply but logging it failed, Retry sends the customer a second copy. |
+| 19 | Medium | `app/inbox/api.py:126` | With several addresses in To (or an unparseable From), the raw header is stored instead. That can exceed 320 characters (intake 500, email lost), and a bad From becomes the reply recipient and HubSpot contact. |
+| 20 | High | `app/inbox/management/commands/purge_old_bodies.py:29` | The 90-day purge also blanks drafts and approvals of emails that are still open. Retrying such an email can send the customer "[deleted after retention period]". |
+
+## Fix plan (second round)
+
+- **Agent E:** #11, #12, #19 (intake: `cleaning.py`, `api.py` create_email / `_parse_date`)
+- **Agent F:** #13, #18, #20 (retry and send safety: `services.retry`, `api.record_failure` / claims, `purge_old_bodies`)
+- **Agent G:** #14, #15, #16 (n8n error paths in WF2/WF3, and tying the Slack approval to the draft it showed)
+- **Agent H:** #17 (metrics)
