@@ -72,3 +72,35 @@ Findings were reasoned from the code, not reproduced; #11, #12, #13, #19 and #20
 - **Agent F:** #13, #18, #20 (retry and send safety: `services.retry`, `api.record_failure` / claims, `purge_old_bodies`)
 - **Agent G:** #14, #15, #16 (n8n error paths in WF2/WF3, and tying the Slack approval to the draft it showed)
 - **Agent H:** #17 (metrics)
+
+## Status (second round): all 10 fixed
+
+On branch `fix/code-review-2026-10-16`. The combined branch (both rounds) passes 201 tests (155 before the reviews)
+and `makemigrations --check` finds nothing missing (no new migrations); every workflow JSON parses, and WF2/WF3 import
+into n8n 2.43.2.
+
+| Commit | Fixes |
+|---|---|
+| Cleaning: only treat From: as an Outlook quote header when followed by header lines | #11 |
+| Intake: fix naive Date headers crashing with Django 5 (timezone.utc removed) | #12 |
+| Keep the email retryable when Retry can't reach n8n | #13 |
+| WF2: stop with an error on any unexpected Django answer | #14 |
+| WF3: only a real "already decided" answer ends quietly | #15 |
+| Tie the Slack approval to the draft its card showed | #16 |
+| Metrics: count reviewed by human involvement, not needs_review_reason | #17 |
+| Never resend a reply whose send may already have gone out | #18 |
+| Intake: parse To/From/Reply-To with getaddresses; never reply to an unparseable sender | #19 |
+| Purge only closed emails; never send a purged reply | #20 |
+
+New behaviour to know about:
+- #18: when it isn't known whether a reply went out, the email shows **Mark as sent** / **Send again anyway** in the
+  dashboard instead of Retry. A Gmail error before sending also lands here (it can't be told apart from "sent, but
+  logging failed").
+- #19: an email whose sender address can't be parsed is saved and sent to review; it can't be replied to or added to HubSpot.
+
+Not yet verified / known gaps:
+- None of the changed n8n branches (#3, #5, #14, #15, #16) has been run end to end; the mocks can't produce the
+  needed errors (402/503 uploads, 5xx/409 from Django).
+- No Slack message when a Slack approval is refused as stale (#16) or when an unconfirmed send is moved to failed
+  (#18); both show up in the dashboard review queue.
+- `metrics.REVIEW_ALERT_KEY` must match WF2's `slack_alert:<id>:review` key (it does today).
