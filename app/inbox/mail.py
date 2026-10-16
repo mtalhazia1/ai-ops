@@ -11,13 +11,21 @@ from email.utils import formataddr
 from .models import Email
 
 
+class NoRecipient(ValueError):
+    """Intake could not parse a sender (or Reply-To) address, so there is no one to reply to."""
+
+
 def reply_recipient(email: Email) -> str:
+    """The address the reply goes to, or "" when intake stored none."""
     return email.reply_to or email.from_email
 
 
 def build_reply(email: Email, subject: str, body: str) -> EmailMessage:
+    recipient = reply_recipient(email)
+    if not recipient:
+        raise NoRecipient(f"email #{email.pk} has no valid sender address to reply to")
     msg = EmailMessage()
-    msg["To"] = formataddr((email.from_name, reply_recipient(email))) if not email.reply_to else email.reply_to
+    msg["To"] = formataddr((email.from_name, recipient)) if not email.reply_to else recipient
     msg["Subject"] = subject
     if email.rfc_message_id:
         msg["In-Reply-To"] = email.rfc_message_id

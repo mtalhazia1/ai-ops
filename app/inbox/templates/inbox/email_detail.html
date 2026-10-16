@@ -31,7 +31,11 @@
       <button type="submit" name="action" value="reject" class="danger">Reject</button>
       {% if email.status == "needs_review" %}<button type="submit" name="action" value="ignore">Ignore (no reply)</button>{% endif %}
     </div>
+    {% if email.reply_to or email.from_email %}
     <small class="muted">Goes to {{ email.reply_to|default:email.from_email }} in the same Gmail thread. Sending runs in n8n (WF3).</small>
+    {% else %}
+    <small class="muted">No valid sender address was found, so this email can't be answered from here. Reply from Gmail, or reject / ignore it.</small>
+    {% endif %}
   </form>
   {% if can_redraft %}
   <form method="post" action="{% url 'inbox:redraft' email.pk %}" class="inline">{% csrf_token %}

@@ -64,3 +64,42 @@ def test_unparseable_date_falls_back_to_now(api):
     response = api("post", "/emails", {**PAYLOAD, "date": "not a date"})
     assert response.status_code == 200
     assert Email.objects.get().received_at is not None
+
+
+def test_several_to_addresses_store_the_first_valid_one(api):
+    many = ", ".join(f"Person {i} <person{i}@acme-textiles.example>" for i in range(40))  # > 320 chars
+    response = api("post", "/emails", {**PAYLOAD, "to": f"undisclosed-recipients:;, {many}"})
+    assert response.status_code == 200
+    assert Email.objects.get().to_email == "person0@acme-textiles.example"
+
+
+def test_unparseable_to_is_stored_empty(api):
+    response = api("post", "/emails", {**PAYLOAD, "to": "x" * 400})
+    assert response.status_code == 200
+    assert Email.objects.get().to_email == ""
+
+
+def test_reply_to_with_several_addresses_uses_first(api):
+    api("post", "/emails", {**PAYLOAD, "reply_to": "Desk <desk@acme-textiles.example>, b@acme-textiles.example"})
+    assert Email.objects.get().reply_to == "desk@acme-textiles.example"
+
+
+def test_garbage_reply_to_is_ignored(api):
+    api("post", "/emails", {**PAYLOAD, "reply_to": "not an address"})
+    assert Email.objects.get().reply_to == ""
+
+
+def test_unparseable_from_is_saved_without_address(api):
+    raw = "Sarah Khan via some broken gateway"
+    response = api("post", "/emails", {**PAYLOAD, "from": raw})
+    assert response.status_code == 200 and response.json()["created"] is True
+    email = Email.objects.get()
+    assert email.from_email == ""
+    assert email.from_name == raw
+
+
+def test_long_garbage_from_does_not_500(api):
+    response = api("post", "/emails", {**PAYLOAD, "from": "y" * 1000})
+    assert response.status_code == 200
+    email = Email.objects.get()
+    assert email.from_email == "" and len(email.from_name) == 255

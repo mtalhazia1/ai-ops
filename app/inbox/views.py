@@ -17,7 +17,7 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from . import metrics, services, state
+from . import mail, metrics, services, state
 from .forms import DecisionForm, PlaybookForm, TriageEditForm
 from .llm import guard, schemas
 from .models import Category, Email, EvalRun, Failure, Playbook, Status, Triage
@@ -134,6 +134,10 @@ def decide(request, pk):
     if action == "approve":
         if not body:
             messages.error(request, "Write the reply before approving.")
+            return redirect("inbox:email_detail", pk=pk)
+        if not mail.reply_recipient(email):
+            messages.error(request, "No valid sender address was found in this email, so a reply can't be sent. "
+                                    "Reply from Gmail directly, or reject / ignore it here.")
             return redirect("inbox:email_detail", pk=pk)
         problems = guard.check_reply(body, allowed_sources=[email.subject, email.body_text, email.from_email,
                                                            services.PlaybookData.from_model(Playbook.get()).text()])

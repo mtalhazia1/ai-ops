@@ -6,7 +6,7 @@ import hmac
 import re
 from datetime import datetime
 from datetime import timezone as dt_timezone
-from email.utils import parseaddr, parsedate_to_datetime
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from typing import Any, Optional
 
 from django.conf import settings
@@ -110,6 +110,28 @@ def _parse_date(value: Optional[str]) -> datetime:
     return parsed
 
 
+_ADDRESS_RE = re.compile(r"^[^@\s<>()\[\],;:\"]+@[^@\s<>()\[\],;:\"]+\.[^@\s<>()\[\],;:\"]+$")
+_ADDRESS_MAX = 320  # Email.from_email / to_email / reply_to
+
+
+def _addresses(header: Optional[str]) -> list[tuple[str, str]]:
+    """(name, address) pairs with a usable address, in header order. getaddresses
+    copes with several addresses, unlike parseaddr, which gives ('', '') for them."""
+    if not header:
+        return []
+    try:
+        pairs = getaddresses([header])
+    except Exception:  # malformed header; treat as no address
+        return []
+    return [(name, addr) for name, addr in pairs
+            if addr and len(addr) <= _ADDRESS_MAX and _ADDRESS_RE.match(addr)]
+
+
+def _first_address(header: Optional[str]) -> tuple[str, str]:
+    found = _addresses(header)
+    return found[0] if found else ("", "")
+
+
 @api.post("/emails")
 def create_email(request, payload: EmailIn):
     """Insert-or-ignore on gmail_message_id. `created=false` tells n8n to stop."""
@@ -117,17 +139,22 @@ def create_email(request, payload: EmailIn):
     if existing:
         return {"id": existing.id, "created": False, "status": existing.status}
 
-    from_name, from_email = parseaddr(payload.from_)
-    _, to_email = parseaddr(payload.to)
+    # An unparseable From is still saved (never lose an email), but with no address:
+    # triage then routes it to review and nothing can be sent or upserted to it.
+    from_name, from_email = _first_address(payload.from_)
+    if not from_email:
+        from_name = (parseaddr(payload.from_)[0] or payload.from_).strip()[:255]
+    _, to_email = _first_address(payload.to)
+    _, reply_to = _first_address(payload.reply_to)
     try:
         with transaction.atomic():
             email = Email.objects.create(
                 gmail_message_id=payload.gmail_message_id,
                 gmail_thread_id=payload.gmail_thread_id,
-                from_email=from_email or payload.from_,
-                from_name=from_name,
-                to_email=to_email or payload.to,
-                reply_to=parseaddr(payload.reply_to)[1] if payload.reply_to else "",
+                from_email=from_email,
+                from_name=from_name[:255],
+                to_email=to_email,
+                reply_to=reply_to,
                 rfc_message_id=payload.message_id.strip()[:998],
                 references=payload.references.strip(),
                 subject=payload.subject,
@@ -309,6 +336,8 @@ def record_approval(request, email_id: int, payload: ApprovalIn):
         return api.create_response(request, {"detail": "decision must be approved, edited or rejected"}, status=422)
     if payload.channel not in ("slack", "dashboard"):
         return api.create_response(request, {"detail": "channel must be slack or dashboard"}, status=422)
+    if payload.decision != "rejected" and not mail.reply_recipient(get_object_or_404(Email, pk=email_id)):
+        return api.create_response(request, {"detail": "no valid sender address to reply to"}, status=422)
     get_object_or_404(Email, pk=email_id)
     with transaction.atomic():
         email = Email.objects.select_for_update().get(pk=email_id)

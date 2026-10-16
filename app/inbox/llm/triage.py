@@ -20,6 +20,7 @@ from . import guard, schemas
 from .client import LLM, LLMError, Usage, get_llm
 
 PROMPTS = Path(__file__).parent / "prompts"
+NO_SENDER_REASON = "sender address could not be parsed (no reply or CRM contact possible)"
 
 
 @lru_cache(maxsize=None)
@@ -73,7 +74,10 @@ class TriageResult:
 
 
 def render_email(email: EmailInput) -> str:
-    sender = f"{email.from_name} <{email.from_email}>" if email.from_name else email.from_email
+    if email.from_name and email.from_email:
+        sender = f"{email.from_name} <{email.from_email}>"
+    else:
+        sender = email.from_email or email.from_name or "(unknown sender)"
     attachments = ", ".join(email.attachment_names) or "(none)"
     body = email.body_clean[: settings.CLASSIFY_MAX_CHARS]
     received = email.received_at.date().isoformat() if email.received_at else "unknown"
@@ -180,6 +184,9 @@ def triage(email: EmailInput, llm: LLM | None = None, company_name: str | None =
         review_reasons.append("classifier flagged instructions to AI")
     if keyword_hits:
         review_reasons.append(f"injection keywords: {', '.join(keyword_hits[:3])}")
+    if not email.from_email:
+        # Intake could not parse a sender address: no automatic reply or CRM contact.
+        review_reasons.append(NO_SENDER_REASON)
 
     return _result(
         email, usage, started, category=category, urgency=urgency, confidence=cls.confidence,
