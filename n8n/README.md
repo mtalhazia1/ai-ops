@@ -148,8 +148,10 @@ Started by WF2 (Slack decision) or by `POST /webhook/execute` (dashboard, header
 1. **Record decision**: `POST /internal/emails/{id}/approval`. Django checks the state, saves the `Approval`,
    moves the email to `approved`/`rejected` and returns the reply as a raw RFC 5322 message. The recipient
    (Reply-To or From) and the `In-Reply-To`/`References` headers come from the stored Gmail metadata. The same
-   decision repeated returns the saved one, so a retried WF3 can finish; a different one is refused (409),
-   and WF3 stops quietly.
+   decision repeated returns the saved one, so a retried WF3 can finish. WF3 stops quietly only when the
+   email was already decided otherwise (409 naming `approved`, `done`, `rejected` or `ignored`); any other
+   answer (422, other 409s, 5xx, an HTML error page) stops with an error so WF4 records it.
+   *Mark done* likewise accepts only `done` (or "already done" on a rerun).
 2. **Rejected**: label `ai-rejected`, remove `ai-processing`.
 3. **Approved**: claim `reply_sent:{id}` → Gmail `messages.send` with `threadId` (no automatic retry on
    this node; the claim makes a manual retry safe) → log → status `done` → label `ai-processed`.
