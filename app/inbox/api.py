@@ -59,6 +59,11 @@ def invalid_transition(request, exc: state.InvalidTransition):
     )
 
 
+@api.exception_handler(mail.PurgedBody)
+def purged_body(request, exc: mail.PurgedBody):
+    return api.create_response(request, {"detail": str(exc)}, status=409)
+
+
 # --- Health -------------------------------------------------------------------------
 
 @api.get("/health")
