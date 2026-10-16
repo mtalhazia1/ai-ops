@@ -121,6 +121,12 @@ WF1 / Retry webhook ─► Email ID ─► Triage (Django) ─► Needs review? 
 - **Retries**: every external HTTP node retries twice with a 5 s wait. Slack replies `200 {ok:false}` on
   errors, so an IF checks `ok` and a *Stop and Error* node fails the run (WF4 then records it and frees the
   claims). ShipMatch uploads never throw: the status code is logged (`ok=false` for 400/402).
+- **Django answers are checked, not trusted**: the few internal calls that must read a refusal
+  (`/draft`, `/status` for paperwork and the approval timeout) don't throw on 4xx/5xx, so an IF accepts only
+  the answers it knows (ok draft, blocked draft, `pending`, or a 409 saying the email is already where it
+  should be) and anything else — a 5xx, an unexpected 409, an HTML error page — goes to a *Stop and Error*
+  node, so WF4 records it and Retry works. Their retry-on-fail only covers connection errors; a 5xx from
+  Django is a bug or a database problem, which Retry handles.
 - **Retry webhook**: `POST /webhook/process` with header `x-webhook-secret: $N8N_WEBHOOK_SECRET` and body
   `{"email_id": 123}`. The dashboard's Retry button (M5) will call it after `failed → received`.
 - ShipMatch off (`SHIPMATCH_ENABLED=false` in `.env`): status emails skip the lookup; paperwork emails go to
