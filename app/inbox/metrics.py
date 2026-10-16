@@ -2,8 +2,14 @@
 
 Definitions:
 - handled: emails received in the period.
-- automatic: replies sent whose draft was approved unchanged and that never went to review.
-- reviewed: emails that went to review, or whose reply was edited by a person.
+- automatic: replies sent where the AI's triage and draft went through untouched: the email
+  was never routed to review and the draft was approved unchanged. Approving in Slack (or
+  clicking Approve in the dashboard without changing the text) is the normal human sign-off
+  every reply needs in v1, so it does not make a reply "reviewed". A failure followed by a
+  Retry does not either: failures are counted separately.
+- reviewed: emails where a person had to step in: routed to needs_review at some point
+  (triage route "review", a blocked draft, a review alert, or sitting in review now), a
+  person corrected the triage in the dashboard, or the reply was edited before sending.
 - time to reply: from Gmail receipt to the reply being sent (replies sent in the period).
 """
 
@@ -14,7 +20,7 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 from .models import Action, Approval, Category, Draft, Email, Failure, Status, Triage
@@ -32,6 +38,30 @@ def _minutes(delta: timedelta) -> float:
     return round(delta.total_seconds() / 60, 1)
 
 
+# Every WF2 path into needs_review claims this Slack alert key (see 02_process.json).
+REVIEW_ALERT_KEY = "slack_alert:{id}:review"
+
+
+def needed_human(email_ids) -> set[int]:
+    """The emails among `email_ids` that a person had to handle (see "reviewed" above).
+
+    Deliberately not based on Email.needs_review_reason: state.transition also writes the
+    failure message there when an email moves to failed.
+    """
+    ids = set(email_ids)
+    if not ids:
+        return set()
+    found = set(Triage.objects.filter(email_id__in=ids)
+                .filter(Q(route="review") | Q(model_classify__startswith="human:"))
+                .values_list("email_id", flat=True))
+    found |= set(Draft.objects.filter(email_id__in=ids, ok=False).values_list("email_id", flat=True))
+    found |= set(Approval.objects.filter(email_id__in=ids, decision="edited").values_list("email_id", flat=True))
+    found |= set(Email.objects.filter(id__in=ids, status=Status.NEEDS_REVIEW).values_list("id", flat=True))
+    keys = {REVIEW_ALERT_KEY.format(id=i): i for i in ids - found}
+    found |= {keys[k] for k in Action.objects.filter(idempotency_key__in=keys).values_list("idempotency_key", flat=True)}
+    return found
+
+
 def compute(period: str = "today", now: datetime | None = None) -> dict[str, Any]:
     start = period_start(period, now)
     emails = Email.objects.filter(received_at__gte=start)
@@ -42,10 +72,8 @@ def compute(period: str = "today", now: datetime | None = None) -> dict[str, Any
     replies = Action.objects.filter(kind="reply_sent", ok=True, created_at__gte=start).select_related("email")
     reply_minutes = [_minutes(a.created_at - a.email.received_at) for a in replies]
     replied_ids = [a.email_id for a in replies]
-    edited_ids = set(Approval.objects.filter(email_id__in=replied_ids, decision="edited").values_list("email_id", flat=True))
-    reviewed_ids = set(Email.objects.filter(id__in=replied_ids).exclude(needs_review_reason=None)
-                       .values_list("id", flat=True))
-    automatic = len([i for i in replied_ids if i not in edited_ids and i not in reviewed_ids])
+    reviewed_ids = needed_human(set(emails.values_list("id", flat=True)) | set(replied_ids))
+    automatic = len([i for i in replied_ids if i not in reviewed_ids])
 
     ai_cost = (Triage.objects.filter(created_at__gte=start).aggregate(c=Sum("cost_usd"))["c"] or Decimal(0)) + (
         Draft.objects.filter(created_at__gte=start).aggregate(c=Sum("cost_usd"))["c"] or Decimal(0))
@@ -59,7 +87,7 @@ def compute(period: str = "today", now: datetime | None = None) -> dict[str, Any
         "by_category": {c: by_category.get(c, 0) for c in Category.values},
         "replies_sent": len(replied_ids),
         "automatic": automatic,
-        "reviewed": emails.exclude(needs_review_reason=None).count() + len(edited_ids - reviewed_ids),
+        "reviewed": len(reviewed_ids),
         "rejected": by_status.get(Status.REJECTED, 0),
         "avg_minutes_to_reply": round(sum(reply_minutes) / len(reply_minutes), 1) if reply_minutes else None,
         "median_minutes_to_reply": round(median(reply_minutes), 1) if reply_minutes else None,
