@@ -40,10 +40,12 @@ On branch `fix/code-review-2026-10-16`. The combined branch passes 163 tests (15
 | Template: use real line breaks in Slack messages | #6 |
 | Fail loudly on workflow publish errors; make backup retention space-safe | #9, #10 |
 
-Not yet verified:
-- The WF2 change (#3, #5) imports cleanly into n8n 2.43.2, but no workflow has been run end to end.
-  `dev/mocks/mock_services.py` always accepts uploads, so it can't simulate a refusal (402) or an outage (503) yet.
+Verified end to end on 2026-10-17 (see "End-to-end run" below): #1 (Slack resume links use `WEBHOOK_URL`),
+#2, #3, #5, #7, #8 and #9 (the script now prints each publish) in n8n 2.43.2 against the mocks.
+
+Still not verified:
 - `scripts/import_workflows.sh` still hides the output of `dc restart`.
+- #6 (template) and #10 (backup retention) were not run.
 
 ---
 
@@ -98,9 +100,71 @@ New behaviour to know about:
   logging failed").
 - #19: an email whose sender address can't be parsed is saved and sent to review; it can't be replied to or added to HubSpot.
 
-Not yet verified / known gaps:
-- None of the changed n8n branches (#3, #5, #14, #15, #16) has been run end to end; the mocks can't produce the
-  needed errors (402/503 uploads, 5xx/409 from Django).
-- No Slack message when a Slack approval is refused as stale (#16) or when an unconfirmed send is moved to failed
-  (#18); both show up in the dashboard review queue.
+Verified end to end on 2026-10-17 (see below): #14, #15, #16, #17 (one case), #18, and #19 as far as WF3 goes
+(no address → 422 → failure). The run found that the #16 change had broken every Slack approval (fixed, see below).
+
+Known gaps:
+- No Slack message when a Slack approval is refused as stale (#16); it shows up in the dashboard review queue.
+  An unconfirmed send (#18) moved to failed by a WF3 error gets WF4's `#ops-alerts` message (verified); one
+  moved there by an expired claim still has no message.
 - `metrics.REVIEW_ALERT_KEY` must match WF2's `slack_alert:<id>:review` key (it does today).
+- Not run end to end: #11, #12, #13 (n8n down during Retry), #20 (purge); they are covered by pytest only.
+
+---
+
+# End-to-end run against the mocks — 2026-10-17
+
+The n8n paths changed by both reviews had only been imported. This run executed them in n8n 2.43.2 (queue mode,
+one worker) against `dev/mocks/mock_services.py`, with `SHIPMATCH_ENABLED=true` and `APPROVAL_TIMEOUT_MINUTES=1`.
+
+The mocks gained failure controls (upload filename markers `refuse400` / `paused402`, and `POST /_control`
+rules for 4xx/5xx answers, delays and a malformed Anthropic answer), and `dev/e2e_scenarios.py` scripts the
+scenarios (see `n8n/README.md`, "Running offline with mocks"). On a fresh stack all 11 scenarios pass:
+
+| Scenario | Checks | Result |
+|---|---|---|
+| `happy` | 7 categories × 3 overlapping WF2 runs: 1 deal, 1 note, 1 task, 2 uploads (`.exe` skipped), 1 urgent alert, 1 review alert each for other/injection, 1 card each; Approve → 1 Gmail send + `ai-processed`; Reject → nothing sent + `ai-rejected`; no Failure | PASS |
+| `late_rerun` | WF2 rerun on an awaiting-approval and on a rejected email ends at *Already processed*, status unchanged | PASS (after fix B) |
+| `refusal` (#2/#5/#7/#8) | 402 + 400 → `needs_review`, reason names both files (no attachment ids, no `HTTP None`), blocked draft with empty body, no drafting LLM call, 1 review alert; rerun → `/draft` answers the same `ok:false, rerun:true`, no new draft, no second alert | PASS |
+| `retry` (#5, #3) | 503 upload → WF2 error at *ShipMatch upload failed*, Failure + `#ops-alerts`, email `failed`, good upload kept, flaky claim released; dashboard Retry → only the flaky file re-uploaded, *Ready for draft* and `/draft` once, after *Log upload*; failure resolved; card posted | PASS |
+| `draft_errors` (#14) | Anthropic 500 → Django saves a blocked draft ("drafting failed: InternalServerError…") → review + alert, WF2 succeeds. Malformed Anthropic answer → `/draft` 500 HTML → WF2 error at *Draft failed*, Failure, alert; Retry reuses the triage (1 LLM call) → ok draft + card | PASS |
+| `approval_errors` (#15) | `/approval` 422 (unparseable sender) → WF3 error at *Decision not recorded* with Django's reason, Failure, nothing sent; dashboard Reject then the old Slack Approve → WF3 ends at *Already decided otherwise*, no Failure; WF2 on a `failed` email → error at *Triage failed* | PASS |
+| `stale` (#16) | Re-draft in the dashboard, then the old Slack Approve → 409 `stale_draft`, WF3 ends quietly, nothing sent, no Approval, email in review; dashboard Approve → exactly 1 reply with the new draft | PASS (after fix A) |
+| `send_uncertain` (#18) | Gmail 503 after the claim → WF3 error, email `failed` with "reply may already have been sent", claim `uncertain`, alert; dashboard Retry refused and starts no WF3; page shows *Mark as sent* / *Send again anyway*; *Send again anyway* → exactly 1 reply, `done` | PASS |
+| `race` (#2) | Two runs on one paperwork email, first upload slow (8 s) and refused (402): second run ends at *Another run drafts* (`pending:true`), first drafts blocked → review; no ok draft, no card | PASS |
+| `timeout` | No click → after 1 min *Approval timed out* → `needs_review` + 1 review alert; a dashboard Approve meanwhile → *Already decided*, still 1 reply | PASS |
+| `metrics` (#17) | `/internal/metrics?period=today` matches the database (handled, replies, failures, open failures, queues, rejected); a reply sent after a failure counts as automatic; WF5 *Run now* posts the same digest text | PASS |
+
+`pytest` (CI way: postgres:17, python:3.12-slim): 201 passed; `makemigrations --check`: no changes.
+
+## Bugs found and fixed
+
+- **A. Slack "Approve and send" always failed (regression from #16).** `/draft` returns `draft_id` as a number,
+  WF3's input declares it a string, and n8n 2.43.2 rejects the sub-workflow call ("Invalid input for 'draft_id'").
+  Nothing was recorded or sent; when an overlapping run had touched the email last, WF4 couldn't even tie the
+  failure to it, so the email sat in `awaiting_approval`. Fix: WF2 passes `String(draft_id)`.
+- **B. A late WF2 run failed a healthy email.** `/triage` answers 409 for an email past triage; the node threw and
+  WF4 moved the email to `failed`. `dev/e2e_wf2.py --runs 3` hit it for most emails (with more runs than worker
+  slots, queued runs start after the first has drafted); the email's live Slack card then failed too. The same
+  happened at `/draft` (409 `needs_review`) for an email in review with an ok draft. Fix: WF2 reads `/triage`
+  like `/draft`: 409 naming `awaiting_approval`/`approved`/`done`/`rejected`/`ignored` → *Already processed*,
+  anything else → *Triage failed* (with Django's detail, not n8n's generic 409 text); `/draft` 409 naming
+  `needs_review`/`rejected`/`ignored` → *Left to the reviewer*.
+- **C. The stack didn't start from a Windows checkout.** With `core.autocrlf=true`, `docker/postgres-init.sh`
+  had CRLF line endings, postgres couldn't run it, and the databases were never created. Fix: `.gitattributes`
+  (`*.sh text eol=lf`).
+
+## Observations (not changed)
+
+- An Anthropic outage while drafting sends the email to review (blocked draft "drafting failed"), not to
+  `failed`; Retry doesn't apply, the reviewer uses Re-draft. That is Django's documented behaviour for LLM
+  errors, unlike #5's rule for ShipMatch outages; worth a decision.
+- Metrics: an email whose Slack approval was refused as stale (dashboard Re-draft, then dashboard Approve) counts
+  as "automatic": the stale path moves it to review without a review alert, and nothing else records that a
+  person re-drafted it.
+- WF4 finds the email by the last n8n execution that called Django for it. A resumed approval run that fails
+  before calling Django again (as in A), after an overlapping run touched the email, records an unattached
+  Failure.
+- n8n 2.43.2 logs "WEBHOOK_URL -> Use N8N_WEBHOOK_URL instead", but honours `WEBHOOK_URL` (the run set it to
+  `http://127.0.0.1:5678/` and the Slack links used it). #1's fix works; the variable may need renaming on a later
+  n8n upgrade.

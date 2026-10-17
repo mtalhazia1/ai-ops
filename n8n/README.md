@@ -120,13 +120,18 @@ WF1 / Retry webhook ─► Email ID ─► Triage (Django) ─► Needs review? 
   LLM's extracted fields only go into the deal name and note text.
 - **Retries**: every external HTTP node retries twice with a 5 s wait. Slack replies `200 {ok:false}` on
   errors, so an IF checks `ok` and a *Stop and Error* node fails the run (WF4 then records it and frees the
-  claims). ShipMatch uploads never throw: the status code is logged (`ok=false` for 400/402).
+  claims). ShipMatch uploads never throw: 200/201 and the refusals 400/402 are logged (`ok=false` for
+  400/402); any other answer (429, 5xx) stops the run at *ShipMatch upload failed*, so Retry repeats it.
 - **Django answers are checked, not trusted**: the few internal calls that must read a refusal
-  (`/draft`, `/status` for paperwork and the approval timeout) don't throw on 4xx/5xx, so an IF accepts only
-  the answers it knows (ok draft, blocked draft, `pending`, or a 409 saying the email is already where it
-  should be) and anything else — a 5xx, an unexpected 409, an HTML error page — goes to a *Stop and Error*
-  node, so WF4 records it and Retry works. Their retry-on-fail only covers connection errors; a 5xx from
-  Django is a bug or a database problem, which Retry handles.
+  (`/triage`, `/draft`, `/status` for paperwork and the approval timeout) don't throw on 4xx/5xx, so an IF
+  accepts only the answers it knows (a triage result, ok draft, blocked draft, `pending`, or a 409 saying the
+  email is already where it should be) and anything else — a 5xx, an unexpected 409, an HTML error page —
+  goes to a *Stop and Error* node, so WF4 records it and Retry works. Their retry-on-fail only covers
+  connection errors; a 5xx from Django is a bug or a database problem, which Retry handles.
+- **Late reruns end quietly**: a WF2 run for an email WF2 is already done with (a duplicate or queued run,
+  a manual re-run) ends at *Already processed* when `/triage` answers 409 with `awaiting_approval`,
+  `approved`, `done`, `rejected` or `ignored`, and at *Left to the reviewer* when `/draft` answers 409 with
+  `needs_review` (e.g. after the approval timeout). A 409 naming `failed` is an error: use Retry.
 - **Retry webhook**: `POST /webhook/process` with header `x-webhook-secret: $N8N_WEBHOOK_SECRET` and body
   `{"email_id": 123}`. The dashboard's Retry button (M5) will call it after `failed → received`.
 - ShipMatch off (`SHIPMATCH_ENABLED=false` in `.env`): status emails skip the lookup; paperwork emails go to
@@ -206,5 +211,65 @@ python dev/e2e_wf2.py quote --approve     # clicks the Slack card's Approve butt
 For a quick timeout test set `APPROVAL_TIMEOUT_MINUTES=1` in `.env`. To test WF4 and Retry, import the
 credentials with the HubSpot token changed to `pat-bad` (the mock answers 401), send a quote email, then
 re-import the good credentials and press Retry in the dashboard.
+
+### Failure controls
+
+The mocks behave normally unless told otherwise (`GET /_state` shows what they received, `POST /_reset`
+clears it and the rules below):
+
+- **Filename markers** (permanent, like ShipMatch's own refusals): an upload whose filename contains
+  `refuse400` gets 400 (file rejected), `paused402` gets 402 (uploads paused).
+- **`POST /_control`** adds or clears rules that make matching requests fail or wait:
+
+  ```json
+  {"add": [{"target": "upload", "match": "B_flaky.pdf", "status": 503}]}
+  {"add": [{"target": "gmail_send", "status": 503, "times": 1}]}
+  {"add": [{"target": "anthropic", "kind": "draft", "match": "llm500", "status": 500}]}
+  {"add": [{"target": "anthropic", "kind": "draft", "match": "llmbad", "malformed": true}]}
+  {"add": [{"target": "upload", "match": "slow", "delay": 8}]}
+  {"clear": true}
+  ```
+
+  `target` is `upload`, `anthropic`, `gmail_send`, `gmail_attachment`, `slack`, `hubspot` or
+  `shipmatch_search`; `match` is a substring of the request (the multipart body for uploads, the prompt for
+  Anthropic, the decoded message for `gmail_send`); `kind` picks the Anthropic call (`classify`, `extract`,
+  `draft`); `times` limits how many requests fail; a rule without `status` only waits `delay` seconds;
+  `malformed` answers 200 with a message that has no `usage` block. Rules that fired are listed in
+  `/_state` under `faults`. The mocks port isn't published; call it from inside the container, e.g.
+  `docker compose exec mocks python -c "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:9000/_control', data=b'{\"clear\": true}')).read())"`.
+
+What Django does with the Anthropic failures: a 500 (after the SDK's two retries) or output that fails
+validation is a *blocked draft* ("drafting failed: …"), so the email goes to review with a Slack alert; WF2
+ends normally. Only an answer Django can't handle at all (the `malformed` rule) makes `/draft` return 500,
+which WF2 turns into a failure (WF4, Retry).
+
+### Scenario script
+
+`dev/e2e_scenarios.py` runs the failure paths end to end and prints PASS/FAIL per scenario with what it
+checked (Django rows through `psql`, n8n executions from the n8n database, Slack/Gmail/ShipMatch calls from
+the mocks). It needs `SHIPMATCH_ENABLED=true` and `APPROVAL_TIMEOUT_MINUTES=1` in `.env`, and creates a
+dashboard superuser `e2e` (password `E2E_PASSWORD`, default `e2e-pass-123`) to press Retry, Re-draft,
+Approve and "Send again anyway".
+
+```bash
+python dev/e2e_scenarios.py            # all, about 6 minutes (the timeout scenario waits for it)
+python dev/e2e_scenarios.py --list     # happy, late_rerun, refusal, retry, draft_errors, approval_errors,
+                                       # stale, send_uncertain, race, timeout, metrics
+python dev/e2e_scenarios.py refusal retry
+```
+
+| Scenario | What it shows |
+|---|---|
+| `happy` | Every category with three overlapping WF2 runs: one deal, note, task, upload set and alert each; Approve → one Gmail send; Reject → `ai-rejected` label |
+| `late_rerun` | A WF2 run on an email that is awaiting approval or already decided ends at *Already processed* |
+| `refusal` | 402 + 400 uploads → review with the filenames in the reason, no AI draft; a rerun gives the same answer and no second alert |
+| `retry` | A 503 upload fails the run (Failure, `#ops-alerts`, `failed`); dashboard Retry re-uploads only that file and calls `/draft` once, after the upload is logged |
+| `draft_errors` | Anthropic 500 → blocked draft, review; malformed answer → `/draft` 500 → WF2 error, Failure; Retry reuses the triage |
+| `approval_errors` | `/approval` 422 (no sender address) → WF3 error, Failure; a Slack Approve after a dashboard Reject ends quietly; WF2 on a failed email is an error |
+| `stale` | Re-draft in the dashboard, then the old Slack Approve: nothing sent, review; dashboard Approve sends the new draft once |
+| `send_uncertain` | Gmail 503 after the claim: `failed` with "reply may already have been sent", Retry refused, *Send again anyway* sends once |
+| `race` | Two runs on one paperwork email with a slow refused upload: the second stops at *Another run drafts*, no "received" draft |
+| `timeout` | No click → review after the timeout; a dashboard decision meanwhile → *Already decided* |
+| `metrics` | `/internal/metrics?period=today` matches the database; WF5 *Run now* posts the same digest text |
 
 Never import the mock credentials into a real deployment.
