@@ -20,6 +20,7 @@ from django.views.decorators.http import require_POST
 from . import mail, metrics, services, state
 from .forms import DecisionForm, PlaybookForm, TriageEditForm
 from .llm import guard, schemas
+from .llm.client import LLMUnavailable
 from .models import Category, Email, EvalRun, Failure, Playbook, Status, Triage
 
 REVIEW_STATUSES = [Status.NEEDS_REVIEW, Status.AWAITING_APPROVAL, Status.FAILED]
@@ -200,6 +201,10 @@ def redraft(request, pk):
         draft = services.create_draft(email)
     except services.UploadsNotFinished as exc:
         messages.error(request, f"Not re-drafted: {exc}. Try again once the upload is done.")
+        return redirect("inbox:email_detail", pk=pk)
+    except LLMUnavailable as exc:
+        messages.error(request, f"Not re-drafted: the AI service is unavailable right now ({exc}). "
+                                "The current draft is unchanged; try again in a few minutes.")
         return redirect("inbox:email_detail", pk=pk)
     if draft.ok:
         messages.success(request, "New draft ready below.")

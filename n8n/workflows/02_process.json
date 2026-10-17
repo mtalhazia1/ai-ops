@@ -2600,7 +2600,7 @@
     },
     {
       "parameters": {
-        "errorMessage": "={{ 'Unexpected answer from /triage: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+        "errorMessage": "={{ $json.retry === true ? 'Triage not possible now: ' + $json.detail : 'Unexpected answer from /triage: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
       },
       "id": "597f16c6-68c9-5c93-b700-341a6a77717e",
       "name": "Triage failed",

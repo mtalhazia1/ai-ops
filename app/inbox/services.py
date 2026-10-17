@@ -245,6 +245,7 @@ def create_draft(email: Email) -> Draft:
     - an upload ShipMatch refused: no AI call; a blocked Draft with the reason is saved, so
       the reviewer writes the reply instead of approving "documents received";
     - an upload in flight, failed or abandoned: raises UploadsNotFinished.
+    An Anthropic outage raises LLMUnavailable and saves nothing.
     """
     refused, in_progress, unfinished = upload_problems(email)
     if refused:

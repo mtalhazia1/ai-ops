@@ -139,6 +139,8 @@ WF1 / Retry webhook ─► Email ID ─► Triage (Django) ─► Needs review? 
 - **Drafting**: Django drafts from the structured triage data plus the playbook (never the raw email), runs
   the output checks (no new addresses or links, no money amounts, length) and moves the email to
   `awaiting_approval`, or to `needs_review` if the draft is blocked. A repeated call returns the saved draft.
+  An Anthropic outage (connection error, timeout, 429/5xx) is not a blocked draft: `/triage` or `/draft`
+  answers 503 `retry`, WF2 stops with an error and Retry repeats it (see "Running offline with mocks").
 - **Approval**: one card per email in `#ops-approvals` showing category, sender, fields, what was already
   done and the draft, with **Approve and send**, **Reject** and **Edit in dashboard** buttons. The first two
   are signed links to the Wait node's resume URL; the Wait node ignores bots (link previewers can't approve)
@@ -238,10 +240,13 @@ clears it and the rules below):
   `/_state` under `faults`. The mocks port isn't published; call it from inside the container, e.g.
   `docker compose exec mocks python -c "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:9000/_control', data=b'{\"clear\": true}')).read())"`.
 
-What Django does with the Anthropic failures: a 500 (after the SDK's two retries) or output that fails
-validation is a *blocked draft* ("drafting failed: …"), so the email goes to review with a Slack alert; WF2
-ends normally. Only an answer Django can't handle at all (the `malformed` rule) makes `/draft` return 500,
-which WF2 turns into a failure (WF4, Retry).
+What Django does with the Anthropic failures: an outage — a connection error, timeout, 408, 429 or 5xx
+after the SDK's two retries — saves nothing and makes `/triage` or `/draft` answer 503
+`{ok:false, retry:true, detail}`, so WF2 stops at *Triage failed* / *Draft failed*, WF4 records a Failure
+and Retry repeats the call (reusing the saved triage when only drafting failed). Any other API error, a
+refusal, or output that fails validation is a review item as before: a *blocked draft* ("drafting
+failed: …", review + Slack alert), or for triage a `review` route. An answer Django can't handle at all
+(the `malformed` rule) makes `/draft` return 500, which WF2 also turns into a failure.
 
 ### Scenario script
 

@@ -4,6 +4,9 @@ The model sees structured data only (category, fields, missing fields, lookups),
 the raw email, which keeps instructions hidden in an email away from the drafter. The
 subject and recipient are set in code. After the model, `guard.check_reply` blocks
 new addresses or links, money amounts and over-long replies.
+
+An LLM error or invalid output is a blocked draft (review); an outage (`LLMUnavailable`)
+is raised to the caller, so the run fails and Retry drafts again.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from django.conf import settings
 from pydantic import BaseModel, ConfigDict
 
 from . import guard
-from .client import LLM, LLMError, Usage, get_llm
+from .client import LLM, LLMError, LLMUnavailable, Usage, get_llm
 from .triage import _prompt
 
 FIELD_LABELS = {
@@ -142,6 +145,8 @@ def draft_reply(data: DraftInput, playbook: PlaybookData, llm: LLM | None = None
             model=settings.MODEL_DRAFT, system=system, user=render_input(data), schema=DRAFT_SCHEMA,
             validator=DraftOutput, max_tokens=2048,
         )
+    except LLMUnavailable:
+        raise  # an outage, not a bad draft: the caller fails the run (Retry)
     except LLMError as exc:
         usage = exc.usage or Usage()
         return DraftResult(False, subject, "", [], [f"drafting failed: {exc}"[:300]], settings.MODEL_DRAFT,

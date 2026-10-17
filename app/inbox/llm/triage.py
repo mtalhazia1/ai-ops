@@ -2,6 +2,10 @@
 
 Pure function over an `EmailInput`, so the API endpoint and the evaluation runner
 call exactly the same code.
+
+A failed or invalid LLM answer routes the email to review. An outage (`LLMUnavailable`:
+connection error, timeout, 429/5xx after the SDK's retries) is raised instead, so the
+caller can fail the run and Retry triages again; no result is produced for it.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from typing import Any
 from django.conf import settings
 
 from . import guard, schemas
-from .client import LLM, LLMError, Usage, get_llm
+from .client import LLM, LLMError, LLMUnavailable, Usage, get_llm
 
 PROMPTS = Path(__file__).parent / "prompts"
 NO_SENDER_REASON = "sender address could not be parsed (no reply or CRM contact possible)"
@@ -145,6 +149,8 @@ def triage(email: EmailInput, llm: LLM | None = None, company_name: str | None =
     try:
         cls, u = classify(email, llm, company_name)
         usage.add(u)
+    except LLMUnavailable:
+        raise
     except LLMError as exc:
         if exc.usage:
             usage.add(exc.usage)
@@ -171,6 +177,8 @@ def triage(email: EmailInput, llm: LLM | None = None, company_name: str | None =
             field_confidence = {k: v for k, v in raw["field_confidence"].items() if fields.get(k) not in (None, [])}
             flags += guard.container_flags(fields)
             missing = schemas.required_missing(category, fields)
+        except LLMUnavailable:
+            raise
         except LLMError as exc:
             if exc.usage:
                 usage.add(exc.usage)

@@ -19,6 +19,7 @@ from pydantic import ConfigDict, Field
 
 from . import mail, metrics, process, services, state
 from .cleaning import clean_body
+from .llm.client import LLMUnavailable
 from .llm.draft import reply_subject
 from .llm.triage import EmailInput, triage
 from .models import Action, Approval, Draft, Email, Failure, Status, Triage
@@ -210,16 +211,21 @@ def triage_email(request, email_id: int):
                              reason=saved.review_reason or None)
             return process.payload(email, saved, rerun=True)
 
-        result = triage(
-            EmailInput(
-                from_email=email.from_email,
-                from_name=email.from_name,
-                subject=email.subject,
-                body_clean=email.body_clean,
-                attachments=email.attachments,
-                received_at=email.received_at,
+        try:
+            result = triage(
+                EmailInput(
+                    from_email=email.from_email,
+                    from_name=email.from_name,
+                    subject=email.subject,
+                    body_clean=email.body_clean,
+                    attachments=email.attachments,
+                    received_at=email.received_at,
+                )
             )
-        )
+        except LLMUnavailable as exc:
+            # Anthropic outage: nothing saved, the email stays where it was. WF2 fails the
+            # run (WF4 records it, the email goes to failed) and Retry triages again.
+            return api.create_response(request, _llm_unavailable(email, exc), status=503)
         triage_row = Triage.objects.create(
             email=email,
             category=result.category,
@@ -246,6 +252,11 @@ def triage_email(request, email_id: int):
         state.transition(email, target, reason=result.review_reason or None)
 
     return process.payload(email, triage_row)
+
+
+def _llm_unavailable(email: Email, exc: LLMUnavailable) -> dict[str, Any]:
+    return {"id": email.id, "status": email.status, "ok": False, "retry": True,
+            "detail": f"AI service unavailable, try again later ({exc})"[:500]}
 
 
 # --- Draft ------------------------------------------------------------------------
@@ -298,6 +309,10 @@ def draft_email(request, email_id: int):
             # The upload failed (429/5xx) or was abandoned: WF2 fails the run so WF4 records
             # a failure and Retry repeats the upload.
             return api.create_response(request, {**out, "retry": True, "detail": str(exc)}, status=503)
+        except LLMUnavailable as exc:
+            # Anthropic outage: no draft saved, still triaged. Like a transient upload error,
+            # WF2 fails the run and Retry drafts again (reusing the saved triage).
+            return api.create_response(request, _llm_unavailable(email, exc), status=503)
         if draft.ok:
             state.transition(email, Status.AWAITING_APPROVAL)
         elif draft.blocked_reason.startswith(services.UPLOAD_REFUSED_PREFIX):
