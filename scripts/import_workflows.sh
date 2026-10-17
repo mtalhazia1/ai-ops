@@ -25,5 +25,10 @@ for id in wf2process000001 wf3execute000001 wf4error00000001 wf5digest0000001; d
     echo "Publish of $id failed:"; echo "$out" | tail -20; exit 1
   fi
 done
-dc restart n8n n8n-worker >/dev/null 2>&1
+# CLI publish takes effect on restart.
+if out=$(dc restart n8n n8n-worker 2>&1); then
+  echo "Restarted n8n and n8n-worker"
+else
+  echo "Restart of n8n / n8n-worker failed:"; echo "$out" | tail -20; exit 1
+fi
 echo "Done. Open the n8n editor, attach credentials where nodes show a warning, then publish WF1."
