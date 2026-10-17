@@ -498,24 +498,52 @@ def s_transient_retry(r):
     r.email_id = email_id
 
 
+def outage_then_retry(r, label, email_id, since, node, *, llm_calls_on_retry):
+    """The Anthropic outage rule is in place: WF2 must fail at `node` (no draft, no review),
+    and a dashboard Retry after the outage must finish the email."""
+    wait_status(email_id, "failed", "needs_review", "awaiting_approval", timeout=150)
+    quiet()
+    x = executions("wf2", email_id, since)[-1]
+    answer = node_json(x, node.replace(" failed", " (Django)"))
+    r.note(f"({label}) Django answered {json.dumps(answer[0])[:220] if answer else None}")
+    r.check(status_of(email_id) == "failed" and x["status"] == "error" and x["last"] == node
+            and "AI service unavailable" in (x["error"] or ""), f"({label}) WF2 {short(x)}, email {status_of(email_id)}")
+    r.check(answer and answer[0].get("retry") is True and answer[0].get("ok") is False, f"({label}) 503 retry answer")
+    r.check(not rows("draft", email_id) and not email(email_id)["needed_review_at"], f"({label}) no blocked draft, never in review")
+    failures = rows("failure", email_id)
+    r.check(len(failures) == 1 and failures[0]["node"] == node, f"({label}) Failure at {failures[0]['node'] if failures else None}")
+    r.check(len(slack_for(email_id, None, "#ops-alerts")) == 1 and not slack_for(email_id, None, "#ops-review"),
+            f"({label}) one #ops-alerts message, no review alert")
+    clear_faults()
+    calls = mock_state()["llm_calls"]
+    dashboard().post(f"/emails/{email_id}/retry/", {"next": f"/emails/{email_id}/"})
+    wait_status(email_id, "awaiting_approval", timeout=120)
+    quiet()
+    r.check(mock_state()["llm_calls"] - calls == llm_calls_on_retry,
+            f"({label}) Retry: {mock_state()['llm_calls'] - calls} LLM call(s) (expected {llm_calls_on_retry})")
+    r.check(len(rows("draft", email_id)) == 1 and rows("draft", email_id)[0]["ok"]
+            and len(slack_for(email_id, None, "#ops-approvals")) == 1 and all(f["resolved"] for f in rows("failure", email_id)),
+            f"({label}) after Retry: ok draft, approval card, failure resolved")
+
+
 def s_draft_errors(r):
-    """5. #14: Anthropic 500 while drafting, and a malformed Anthropic answer that makes /draft 500."""
+    """5. #14 + observation 1: Anthropic outage while drafting or triaging -> failed + Retry;
+    a malformed Anthropic answer that makes /draft 500."""
     mock("/_reset", {})
     since = last_execution_id()
-    # (a) Anthropic answers 500 (the SDK retries twice, then Django gives up on the draft).
+    # (a) Anthropic answers 500 while drafting (the SDK retries twice): /draft 503, WF2 fails, Retry.
     a = quote_email("llm500", subject="rate pls llm500")
     faults({"target": "anthropic", "kind": "draft", "match": "llm500", "status": 500,
             "body": {"type": "error", "error": {"type": "api_error", "message": "mock outage"}}})
     run_wf2(a)
-    wait_status(a, "needs_review", "failed", timeout=120)
-    quiet()
-    x = executions("wf2", a, since)[-1]
-    answer = node_json(x, "Draft (Django)")
-    r.note(f"(a) Anthropic 500 -> Django /draft answered {json.dumps(answer[0])[:200] if answer else None}")
-    r.check(status_of(a) == "needs_review" and x["status"] == "success" and answer and answer[0].get("ok") is False,
-            f"(a) Django treats it as a blocked draft (\"drafting failed\"): email {status_of(a)}, WF2 {short(x)}")
-    r.check(len(slack_for(a, None, "#ops-review")) == 1, "(a) one #ops-review alert")
-    clear_faults()
+    outage_then_retry(r, "a: draft 500", a, since, "Draft failed", llm_calls_on_retry=1)
+    # (c) Anthropic answers 529 (overloaded) while classifying: /triage 503, nothing saved, Retry triages.
+    c = quote_email("llmtri", subject="rate pls llmtri")
+    faults({"target": "anthropic", "kind": "classify", "match": "llmtri", "status": 529,
+            "body": {"type": "error", "error": {"type": "overloaded_error", "message": "mock overload"}}})
+    run_wf2(c)
+    outage_then_retry(r, "c: classify 529", c, since, "Triage failed", llm_calls_on_retry=3)
+    r.check(len(rows("triage", c)) == 1, "(c) one Triage row, saved by the retry")
     # (b) Anthropic answers 200 with a malformed message: /draft itself fails with 500.
     b = quote_email("llmbad", subject="rate pls llmbad")
     faults({"id": "bad", "target": "anthropic", "kind": "draft", "match": "llmbad", "malformed": True})
@@ -711,6 +739,56 @@ def s_race(r):
             "one review alert, no approval card")
 
 
+def s_resumed_failure(r):
+    """Observation 3: a resumed approval run fails before calling Django again, after an
+    overlapping run touched the email -> WF4 still attaches the Failure to the email."""
+    mock("/_reset", {})
+    since = last_execution_id()
+    email_id = quote_email("resumed")
+    run_wf2(email_id)
+    buttons = wait_card(email_id)
+    holder = wait_until(lambda: [x for x in executions("wf2", email_id, since) if x["status"] == "waiting"], 60,
+                        what="the card's waiting WF2 run")[0]
+    late_rerun(r, email_id, "overlapping run", since)
+    last = email(email_id)["last_execution_id"]
+    r.check(last != str(holder["id"]), f"email's last execution is now #{last}, not the card's run #{holder['id']}")
+    # Make the resumed run fail right after the Wait, before any Django call, exactly like bug A:
+    # in this waiting execution's own copy of WF2, "Send reply (WF3)" passes draft_id as a number
+    # again, so n8n refuses the sub-workflow call ("Invalid input for 'draft_id'").
+    fixed, buggy = "String($('Draft (Django)').item.json.draft_id)", "$('Draft (Django)').item.json.draft_id"
+    dc("exec", "-T", "postgres", "psql", "-U", "postgres", "-d", "n8n", "-c",
+       f"""update execution_data set "workflowData" = replace("workflowData"::text, '{fixed.replace("'", "''")}',
+           '{buggy.replace("'", "''")}')::json where "executionId" = {int(holder['id'])}""")
+    status = click(buttons["Approve and send"])
+    r.check(status == 200, f"Approve clicked -> HTTP {status}")
+    wait_until(lambda: next(x for x in executions("wf2", email_id, since) if x["id"] == holder["id"])["status"] != "waiting",
+               90, what="the resumed run to finish")
+    quiet()
+    x = next(x for x in executions("wf2", email_id, since) if x["id"] == holder["id"])
+    r.check(x["status"] == "error" and x["last"] == "Send reply (WF3)", f"resumed run {short(x)}")
+    failures = rows("failure", email_id)
+    r.check(len(failures) == 1 and failures[0]["execution_id"] == str(holder["id"]),
+            f"Failure attached to the email: {[(f['execution_id'], f['node']) for f in failures]}")
+    r.check(status_of(email_id) == "failed" and not sent_for(email_id) and not rows("approval", email_id),
+            f"email {status_of(email_id)}, nothing sent, no Approval")
+    alerts = slack_for(email_id, None, "#ops-alerts")
+    r.check(len(alerts) == 1, f"{len(alerts)} #ops-alerts message linking the email")
+    unattached = sql("inbox", f"select id from inbox_failure where email_id is null and execution_id = '{holder['id']}'")
+    r.check(not unattached, "no unattached Failure for that execution")
+    # Retry starts over from WF2 (no decision was recorded) and a new card is approved.
+    since2 = last_execution_id()
+    dashboard().post(f"/emails/{email_id}/retry/", {"next": f"/emails/{email_id}/"})
+    wait_status(email_id, "awaiting_approval", timeout=120)
+    new_card = wait_until(lambda: [m for m in slack_for(email_id, None, "#ops-approvals") if m.get("blocks")][1:], 90,
+                          what="a second approval card")
+    click({b["text"]["text"]: b["url"] for b in new_card[-1]["blocks"][1]["elements"]}["Approve and send"])
+    wait_status(email_id, "done")
+    quiet()
+    r.check(len(sent_for(email_id)) == 1 and all(f["resolved"] for f in rows("failure", email_id)),
+            f"after Retry and Approve: {len(sent_for(email_id))} reply, failure resolved")
+    r.check(all(x["status"] in ("success", "waiting") for x in executions("wf2", email_id, since2)), "retry runs succeed")
+
+
 def s_metrics(r):
     """10. #17: /internal/metrics?period=today and the WF5 digest agree with the database."""
     mock("/_reset", {})
@@ -733,11 +811,32 @@ def s_metrics(r):
     retried_sent = sql("inbox", f"""select distinct e.id from inbox_email e join inbox_failure f on f.email_id = e.id
         join inbox_action a on a.email_id = e.id and a.kind = 'reply_sent' and a.ok
         where e.received_at >= '{since}' and not exists (select 1 from inbox_approval p where p.email_id = e.id and p.decision = 'edited')
-        and not exists (select 1 from inbox_triage t where t.email_id = e.id and (t.route = 'review' or t.model_classify like 'human:%'))
-        and not exists (select 1 from inbox_draft d where d.email_id = e.id and not d.ok)
-        and not exists (select 1 from inbox_action s where s.email_id = e.id and s.idempotency_key = 'slack_alert:' || e.id || ':review')""")
+        and e.needed_review_at is null
+        and not exists (select 1 from inbox_triage t where t.email_id = e.id and t.model_classify like 'human:%')
+        and not exists (select 1 from inbox_draft d where d.email_id = e.id and not d.ok)""")
     r.note(f"replies {m['replies_sent']}: automatic {m['automatic']}, reviewed {m['reviewed']}; failed-then-sent-unchanged: {[x['id'] for x in retried_sent]}")
     r.check(m["automatic"] >= len(retried_sent) and m["automatic"] <= m["replies_sent"], "automatic count includes failed-then-retried replies")
+    # Observation 2: the same definition from the database (Email.needed_review_at, not the review-alert key).
+    human = """(e.needed_review_at is not null
+        or exists (select 1 from inbox_triage t where t.email_id = e.id and t.model_classify like 'human:%')
+        or exists (select 1 from inbox_draft d where d.email_id = e.id and not d.ok)
+        or exists (select 1 from inbox_approval p where p.email_id = e.id and p.decision = 'edited'))"""
+    db2 = sql("inbox", f"""select
+        (select count(*) from inbox_action a join inbox_email e on e.id = a.email_id
+          where a.kind = 'reply_sent' and a.ok and a.created_at >= '{since}' and not {human}) as automatic,
+        (select count(*) from inbox_email e where (e.received_at >= '{since}' or exists (select 1 from inbox_action a
+          where a.email_id = e.id and a.kind = 'reply_sent' and a.ok and a.created_at >= '{since}')) and {human}) as reviewed""")[0]
+    r.check(db2["automatic"] == m["automatic"] and db2["reviewed"] == m["reviewed"],
+            f"automatic/reviewed: metrics {m['automatic']}/{m['reviewed']} vs database {db2['automatic']}/{db2['reviewed']}")
+    stale = sql("inbox", f"""select e.id, e.status, e.needed_review_at from inbox_email e
+        where e.gmail_message_id = 'e2e-{STAMP}-stale' and e.received_at >= '{since}'""")
+    if stale:
+        s = stale[0]
+        alerts = sql("inbox", f"select id from inbox_action where idempotency_key = 'slack_alert:{s['id']}:review'")
+        r.check(s["status"] == "done" and s["needed_review_at"] and not alerts,
+                f"stale scenario email #{s['id']}: {s['status']}, needed_review_at set, no review alert -> counted as reviewed")
+    else:
+        r.note("stale scenario not run in this session; its check is skipped")
     # WF5 "Run now".
     since_exec = last_execution_id()
     dc("exec", "-T", "n8n", "n8n", "execute", "--id=" + WF["wf5"])
@@ -754,13 +853,14 @@ SCENARIOS = {
     "late_rerun": ("1b. WF2 rerun after the approval card", s_rerun_after_draft),
     "refusal": ("3. #2/#5/#7/#8 ShipMatch 402/400 refusals", s_refusal),
     "retry": ("4+2. #5/#3 transient 503 upload, Retry, one /draft", s_transient_retry),
-    "draft_errors": ("5. #14 Anthropic 500 / malformed during /draft", s_draft_errors),
+    "draft_errors": ("5. #14/obs.1 Anthropic outage while drafting/triaging, malformed answer", s_draft_errors),
     "approval_errors": ("6. #15 /approval 422, already decided", s_approval_errors),
     "stale": ("7. #16 stale Slack approval after re-draft", s_stale),
     "send_uncertain": ("8. #18 Gmail send 503 after claim", s_send_uncertain),
     "race": ("#2 concurrent runs, slow refused upload", s_race),
     "timeout": ("9. approval timeout / decided meanwhile", s_timeout),
-    "metrics": ("10. #17 metrics and WF5 digest", s_metrics),
+    "resumed_failure": ("obs.3 resumed run fails after an overlapping run", s_resumed_failure),
+    "metrics": ("10. #17/obs.2 metrics and WF5 digest", s_metrics),
 }
 
 
