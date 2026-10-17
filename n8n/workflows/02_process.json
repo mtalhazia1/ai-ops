@@ -2068,7 +2068,7 @@
             "reviewer": "slack",
             "channel": "slack",
             "final_body": "",
-            "draft_id": "={{ $('Draft (Django)').item.json.draft_id }}"
+            "draft_id": "={{ String($('Draft (Django)').item.json.draft_id) }}"
           },
           "matchingColumns": [],
           "schema": [
