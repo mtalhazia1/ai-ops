@@ -5,7 +5,9 @@ x-n8n-env: &n8n-env
   N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
   N8N_HOST: ${N8N_HOST:-localhost}
   N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
-  WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+  # Base URL of webhooks and Wait-node resume links (Slack Approve/Reject). n8n 2.x name;
+  # an older .env with WEBHOOK_URL (deprecated, still honoured by n8n) keeps working.
+  N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-${WEBHOOK_URL:-http://localhost:5678/}}
   GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Asia/Karachi}
   TZ: ${GENERIC_TIMEZONE:-Asia/Karachi}
   EXECUTIONS_MODE: ${EXECUTIONS_MODE:-queue}
