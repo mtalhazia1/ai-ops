@@ -764,6 +764,13 @@ SCENARIOS = {
 }
 
 
+def _webhook_ready():
+    try:
+        return request(f"{N8N}/webhook/process", {})[0] == 200
+    except OSError:  # connection refused or reset while n8n starts
+        return False
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
@@ -774,6 +781,9 @@ def main():
         for name, (title, _) in SCENARIOS.items():
             print(f"{name:16} {title}")
         return
+    # Right after a restart n8n answers 404 until the published webhooks are registered. (A call
+    # without the secret starts a WF2 run that stops at "Secret OK?".)
+    wait_until(lambda: _webhook_ready(), 180, every=3, what="WF2's webhook to be registered")
     results = []
     for name in args.names:
         title, fn = SCENARIOS[name]
