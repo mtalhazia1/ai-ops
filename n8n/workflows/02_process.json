@@ -1804,7 +1804,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval' }) }}"
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval:' + $('Draft (Django)').item.json.draft_id }) }}"
       },
       "id": "fd4f6b94-0892-5afb-9268-8da4a4fbe364",
       "name": "Claim approval message",
@@ -1948,7 +1948,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval', request: {}, response: { channel: $json.channel, ts: $json.ts }, ok: true }) }}"
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval:' + $('Draft (Django)').item.json.draft_id, request: {}, response: { channel: $json.channel, ts: $json.ts }, ok: true }) }}"
       },
       "id": "e19fdfb0-899d-585b-8637-100e91931c45",
       "name": "Log approval message",
