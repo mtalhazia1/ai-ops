@@ -141,7 +141,8 @@ WF1 / Retry webhook ─► Email ID ─► Triage (Django) ─► Needs review? 
   `awaiting_approval`, or to `needs_review` if the draft is blocked. A repeated call returns the saved draft.
   An Anthropic outage (connection error, timeout, 429/5xx) is not a blocked draft: `/triage` or `/draft`
   answers 503 `retry`, WF2 stops with an error and Retry repeats it (see "Running offline with mocks").
-- **Approval**: one card per email in `#ops-approvals` showing category, sender, fields, what was already
+- **Approval**: one card per draft (claim `slack_alert:<id>:approval:<draft_id>`, so overlapping runs share
+  it and a Retry that drafts again posts a new one) in `#ops-approvals` showing category, sender, fields, what was already
   done and the draft, with **Approve and send**, **Reject** and **Edit in dashboard** buttons. The first two
   are signed links to the Wait node's resume URL; the Wait node ignores bots (link previewers can't approve)
   and n8n refuses a second click (409). With no decision before `APPROVAL_TIMEOUT_MINUTES`, the email goes
@@ -260,9 +261,9 @@ dashboard superuser `e2e` (password `E2E_PASSWORD`, default `e2e-pass-123`) to p
 Approve and "Send again anyway".
 
 ```bash
-python dev/e2e_scenarios.py            # all, about 6 minutes (the timeout scenario waits for it)
+python dev/e2e_scenarios.py            # all, about 8 minutes (the timeout scenario waits for it)
 python dev/e2e_scenarios.py --list     # happy, late_rerun, refusal, retry, draft_errors, approval_errors,
-                                       # stale, send_uncertain, race, timeout, metrics
+                                       # stale, send_uncertain, race, timeout, resumed_failure, metrics
 python dev/e2e_scenarios.py refusal retry
 ```
 
@@ -272,12 +273,13 @@ python dev/e2e_scenarios.py refusal retry
 | `late_rerun` | A WF2 run on an email that is awaiting approval or already decided ends at *Already processed* |
 | `refusal` | 402 + 400 uploads → review with the filenames in the reason, no AI draft; a rerun gives the same answer and no second alert |
 | `retry` | A 503 upload fails the run (Failure, `#ops-alerts`, `failed`); dashboard Retry re-uploads only that file and calls `/draft` once, after the upload is logged |
-| `draft_errors` | Anthropic 500 → blocked draft, review; malformed answer → `/draft` 500 → WF2 error, Failure; Retry reuses the triage |
+| `draft_errors` | Anthropic 500 while drafting / 529 while classifying → `/draft` / `/triage` 503, WF2 error, Failure, no review item; Retry finishes (reusing the triage after a drafting outage); malformed answer → `/draft` 500 → WF2 error, Failure; Retry reuses the triage |
 | `approval_errors` | `/approval` 422 (no sender address) → WF3 error, Failure; a Slack Approve after a dashboard Reject ends quietly; WF2 on a failed email is an error |
 | `stale` | Re-draft in the dashboard, then the old Slack Approve: nothing sent, review; dashboard Approve sends the new draft once |
 | `send_uncertain` | Gmail 503 after the claim: `failed` with "reply may already have been sent", Retry refused, *Send again anyway* sends once |
 | `race` | Two runs on one paperwork email with a slow refused upload: the second stops at *Another run drafts*, no "received" draft |
 | `timeout` | No click → review after the timeout; a dashboard decision meanwhile → *Already decided* |
-| `metrics` | `/internal/metrics?period=today` matches the database; WF5 *Run now* posts the same digest text |
+| `resumed_failure` | An overlapping run touches the email, then the card's resumed run fails at *Send reply (WF3)* before calling Django (bug A replayed in that execution's copy of WF2): the Failure is still attached to the email; Retry posts a new card, Approve sends once |
+| `metrics` | `/internal/metrics?period=today` matches the database, including automatic vs reviewed (`needed_review_at`); WF5 *Run now* posts the same digest text |
 
 Never import the mock credentials into a real deployment.

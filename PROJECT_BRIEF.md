@@ -195,7 +195,16 @@ Field names below are what the Django models should use.
 | status | varchar (state machine, Section 13) | indexed |
 | category, urgency | varchar, nullable | Copied from the accepted triage |
 | needs_review_reason | text, nullable | Why it went to a human |
+| needed_review_at | timestamptz, nullable | First time it entered `needs_review` (never cleared; metrics) |
+| last_execution_id | varchar | Last n8n execution that called the internal API for it |
 | created_at, updated_at | timestamptz | |
+
+### `EmailExecution` (every n8n execution that called the internal API for an email)
+| Field | Type | Notes |
+|---|---|---|
+| email FK | | |
+| execution_id | varchar | unique together with `email`; WF4 finds the email by it |
+| created_at | timestamptz | |
 
 ### `Triage` (one per LLM classification + extraction run; several if re-run)
 | Field | Type |
@@ -752,3 +761,8 @@ Times assume about 4–6 focused hours a day. Do not start a milestone until the
 | 2026-10-16 | A `reply_sent` claim is never released or allowed to expire into a re-send. Recording a failure (or a crashed run's claim passing the 10-minute TTL) marks it `uncertain` and moves the email to `failed` with "reply may already have been sent — check the Gmail thread before resending"; the claim endpoint answers `proceed:false, uncertain:true` and Retry refuses. The email page then offers only **Mark as sent** (logs the reply as done by that user, email `done`, nothing sent) or **Send again anyway** (allows one more claim, then Retry's send path). Other claims are still released as before. | Gmail may have sent the reply before the run died; an automatic retry would send the customer a second copy. A Gmail error before sending also lands here: a human checks the thread, which is cheaper than a duplicate. |
 | 2026-10-17 | WF2 reads `/triage` like `/draft`: a 409 naming `awaiting_approval`, `approved`, `done`, `rejected` or `ignored` ends the run at *Already processed*; a 409 from `/draft` naming `needs_review`, `rejected` or `ignored` ends it at *Left to the reviewer*; any other answer stops with an error. | Found by the end-to-end run: a late or queued WF2 run (e.g. `e2e_wf2.py --runs 3` with more runs than worker slots) got a 409, and WF4 moved a healthy email that was awaiting approval to `failed`. |
 | 2026-10-17 | The mocks take failure rules (`POST /_control`, upload filename markers `refuse400` / `paused402`), and `dev/e2e_scenarios.py` runs the failure paths end to end, PASS/FAIL per scenario. | The error branches of WF2–WF4 had only been imported, never run. The run found that Slack approvals had stopped working (`draft_id` passed to WF3 as a number). |
+| 2026-10-17 | An Anthropic outage (connection error, timeout, 408, 429 or 5xx after the SDK's two retries; `LLMUnavailable`) fails the run instead of creating a review item: `/triage` and `/draft` answer 503 `{ok:false, retry:true, detail}` and save nothing, WF2 stops at *Triage failed* / *Draft failed*, WF4 records a Failure and Retry repeats the call (reusing the saved triage when only drafting failed). The dashboard Re-draft reports the outage and keeps the current draft. Other API errors, refusals and invalid output still go to review. | Same rule as transient ShipMatch errors (2026-10-16): a temporary outage says nothing about the email and shouldn't land in the review queue, where Retry can't help. |
+| 2026-10-17 | `Email.needed_review_at`, set by `state.transition` the first time an email enters `needs_review` and never cleared, replaces the `slack_alert:<id>:review` action-key check in `metrics.needed_human`; human triage rows, blocked drafts and edited approvals still count. The migration backfills it. | Some paths into review send no review alert (a stale Slack approval, #16); recording it on the email covers every path and doesn't depend on WF2's key names. |
+| 2026-10-17 | Django keeps every n8n execution id that called the internal API for an email (`EmailExecution`, unique per execution and email, written when the email's last execution changes); `/internal/failures` looks the email up there. An execution that touched several emails (WF1 batch) is still not attached. | A resumed approval run keeps its execution id; when it failed before calling Django again after an overlapping run touched the email, the Failure was unattached and the email sat in `awaiting_approval`. Latest-wins would misattribute WF1 batch failures. |
+| 2026-10-17 | n8n's webhook base is set with `N8N_WEBHOOK_URL` (tested in n8n 2.43.2: both it and `WEBHOOK_URL` work; `WEBHOOK_URL` logs a deprecation). `docker-compose.yml` falls back to an older `.env`'s `WEBHOOK_URL`. | The 2026-10-16 rename to `WEBHOOK_URL` was based on a wrong review finding (#1). |
+| 2026-10-17 | WF2 claims the Slack approval card per draft (`slack_alert:<id>:approval:<draft_id>`), not per email. | After a run failed with its card already posted, Retry drafted again but posted no card, and the old card pointed at a finished execution. Overlapping runs still share one card (same saved draft). |

@@ -7,7 +7,7 @@ by running it; #1, #4, #9 and #10 were spot-checked by reading the code.
 
 | # | Severity | File | Issue |
 |---|---|---|---|
-| 1 | High | `docker-compose.prod.yml:40` (and `docker-compose.yml:8`) | Sets `N8N_WEBHOOK_URL`, but n8n reads `WEBHOOK_URL`. In production the Slack Approve/Reject links point at `https://<domain>:5678/`, a port Caddy doesn't expose, so every approval times out. |
+| 1 | ~~High~~ false positive | `docker-compose.prod.yml:40` (and `docker-compose.yml:8`) | Sets `N8N_WEBHOOK_URL`, but n8n reads `WEBHOOK_URL`. In production the Slack Approve/Reject links point at `https://<domain>:5678/`, a port Caddy doesn't expose, so every approval times out. **Wrong:** tested on 2026-10-17, n8n 2.43.2 honours both names and `WEBHOOK_URL` is the deprecated one (see the 2026-10-17 observations section). |
 | 2 | Medium | `app/inbox/services.py:96` | `failed_uploads` skips pending claims, so a draft can be written while another run's upload is still in flight; if that upload is later refused, the "documents received" draft is already awaiting approval. `test_successful_or_pending_uploads_still_draft` locks this in. |
 | 3 | Medium | `n8n/workflows/02_process.json:1431` | "Ready for draft" is fed by both `Upload?[1]` and "Log upload", so with mixed attachments `/draft` can run before a refused upload is logged. The rerun of `/draft` then returns the earlier ok draft. |
 | 4 | Medium | `app/inbox/views.py:194` | The refused-upload check is only in the API's `draft_email`; the dashboard Re-draft calls `services.create_draft` directly and skips it. The check belongs inside `create_draft`. |
@@ -35,17 +35,18 @@ On branch `fix/code-review-2026-10-16`. The combined branch passes 163 tests (15
 
 | Commit | Fixes |
 |---|---|
-| Set WEBHOOK_URL (not N8N_WEBHOOK_URL) for n8n services | #1 |
+| Set WEBHOOK_URL (not N8N_WEBHOOK_URL) for n8n services (back to `N8N_WEBHOOK_URL` on 2026-10-17: false positive) | #1 |
 | Fix refused-upload guard: pending/transient uploads, one draft call, all draft paths | #2, #3, #4, #5, #7, #8 |
 | Template: use real line breaks in Slack messages | #6 |
 | Fail loudly on workflow publish errors; make backup retention space-safe | #9, #10 |
 
-Verified end to end on 2026-10-17 (see "End-to-end run" below): #1 (Slack resume links use `WEBHOOK_URL`),
-#2, #3, #5, #7, #8 and #9 (the script now prints each publish) in n8n 2.43.2 against the mocks.
+Verified end to end on 2026-10-17 (see "End-to-end run" below): #2, #3, #5, #7, #8 and #9 (the script now prints
+each publish) in n8n 2.43.2 against the mocks. #1 turned out to be a false positive: n8n 2.43.2 reads both
+`N8N_WEBHOOK_URL` and the deprecated `WEBHOOK_URL`, so the original setting already worked.
 
 Still not verified:
-- `scripts/import_workflows.sh` still hides the output of `dc restart`.
 - #6 (template) and #10 (backup retention) were not run.
+- (`scripts/import_workflows.sh` hiding the output of `dc restart`: fixed and run on 2026-10-17.)
 
 ---
 
@@ -107,7 +108,8 @@ Known gaps:
 - No Slack message when a Slack approval is refused as stale (#16); it shows up in the dashboard review queue.
   An unconfirmed send (#18) moved to failed by a WF3 error gets WF4's `#ops-alerts` message (verified); one
   moved there by an expired claim still has no message.
-- `metrics.REVIEW_ALERT_KEY` must match WF2's `slack_alert:<id>:review` key (it does today).
+- ~~`metrics.REVIEW_ALERT_KEY` must match WF2's `slack_alert:<id>:review` key~~ — gone on 2026-10-17: metrics read
+  `Email.needed_review_at` instead.
 - Not run end to end: #11, #12, #13 (n8n down during Retry), #20 (purge); they are covered by pytest only.
 
 ---
@@ -154,17 +156,102 @@ scenarios (see `n8n/README.md`, "Running offline with mocks"). On a fresh stack 
   had CRLF line endings, postgres couldn't run it, and the databases were never created. Fix: `.gitattributes`
   (`*.sh text eol=lf`).
 
-## Observations (not changed)
+## Observations — resolved on 2026-10-17
 
-- An Anthropic outage while drafting sends the email to review (blocked draft "drafting failed"), not to
-  `failed`; Retry doesn't apply, the reviewer uses Re-draft. That is Django's documented behaviour for LLM
-  errors, unlike #5's rule for ShipMatch outages; worth a decision.
-- Metrics: an email whose Slack approval was refused as stale (dashboard Re-draft, then dashboard Approve) counts
-  as "automatic": the stale path moves it to review without a review alert, and nothing else records that a
-  person re-drafted it.
-- WF4 finds the email by the last n8n execution that called Django for it. A resumed approval run that fails
-  before calling Django again (as in A), after an overlapping run touched the email, records an unattached
-  Failure.
-- n8n 2.43.2 logs "WEBHOOK_URL -> Use N8N_WEBHOOK_URL instead", but honours `WEBHOOK_URL` (the run set it to
-  `http://127.0.0.1:5678/` and the Slack links used it). #1's fix works; the variable may need renaming on a later
-  n8n upgrade.
+All four observations below were fixed (or, for the last one, settled by testing) on branch
+`fix/code-review-2026-10-16`; see "Observations: fixes and second end-to-end run" at the end.
+
+- ~~An Anthropic outage while drafting sends the email to review (blocked draft "drafting failed"), not to
+  `failed`; Retry doesn't apply, the reviewer uses Re-draft.~~ **Resolved:** an outage now fails the run and
+  Retry repeats it, during triage as well as drafting.
+- ~~Metrics: an email whose Slack approval was refused as stale (dashboard Re-draft, then dashboard Approve) counts
+  as "automatic".~~ **Resolved:** the email records that it was in review (`needed_review_at`).
+- ~~WF4 finds the email by the last n8n execution that called Django for it. A resumed approval run that fails
+  before calling Django again, after an overlapping run touched the email, records an unattached Failure.~~
+  **Resolved:** every execution id per email is kept.
+- ~~n8n 2.43.2 logs "WEBHOOK_URL -> Use N8N_WEBHOOK_URL instead", but honours `WEBHOOK_URL`.~~ **Settled:** both
+  names work; the compose files are back on `N8N_WEBHOOK_URL`, and round-1 finding #1 was a false positive.
+
+---
+
+# Observations: fixes and second end-to-end run — 2026-10-17
+
+| Commit | Change |
+|---|---|
+| Fail the run on an Anthropic outage instead of routing to review | Obs. 1 |
+| Metrics: record on the email that it needed review | Obs. 2 |
+| WF4: find the email by any execution that touched it | Obs. 3 |
+| n8n: set N8N_WEBHOOK_URL, the non-deprecated name | Obs. 4, corrects #1 |
+| import_workflows.sh: fail loudly when the n8n restart fails | leftover from round 1 |
+| WF2: post a new approval card for a new draft after Retry | new bug D (below) |
+
+1. **Anthropic outage → failed + Retry.** `inbox/llm/client.py` raises `LLMUnavailable` (a subclass of
+   `LLMError`) for a connection error, timeout, 408, 429 or 5xx (incl. 529 overloaded) once the SDK's two retries
+   are used up. `triage()` and `draft_reply()` re-raise it instead of returning a review route / blocked draft.
+   `/triage` and `/draft` answer 503 `{ok:false, retry:true, detail:"AI service unavailable, try again later
+   (…)"}` and save nothing (no Triage row, no Draft, status unchanged). WF2 already sent those answers to
+   *Triage failed* / *Draft failed*; *Triage failed* now words the message like *Draft failed* ("Triage not
+   possible now: …"). WF4 records the Failure and moves the email to `failed`; Retry repeats only what is
+   missing (after a drafting outage the saved triage is reused). Other API errors (400, 401, …), refusals,
+   truncation and invalid output still go to review as before. The dashboard Re-draft says "Not re-drafted: the
+   AI service is unavailable right now (…)" and keeps the current draft.
+2. **`Email.needed_review_at`** (migration 0004): set by `state.transition` the first time an email enters
+   `needs_review`, never cleared. `metrics.needed_human` = `needed_review_at` set, or a human triage row, a blocked
+   draft (a dashboard Re-draft can block one without a status change), or an edited approval.
+   `REVIEW_ALERT_KEY` is gone. The migration backfills from review-routed triages, blocked drafts, review-alert
+   actions, emails in review now, and the stale-approval / approval-timeout reasons.
+3. **`EmailExecution`** (migration 0005; unique per execution id and email): every n8n execution id that called
+   the internal API for an email. The insert happens when the email's `last_execution_id` changes, so it costs one
+   write per run, not per call; intake records its execution too. `/internal/failures` looks the email up there.
+   An execution that touched more than one email (a WF1 batch) is still not attached to any — "latest wins" would
+   fail a healthy email there. The migration seeds the table from `last_execution_id`, which stays.
+4. **`WEBHOOK_URL` vs `N8N_WEBHOOK_URL`, tested.** Throwaway `n8nio/n8n:2.43.2` (sqlite), three runs; the resume
+   URL was read from a Code node returning `$execution.resumeUrl` (imported workflow run with `n8n execute`),
+   plus the startup log:
+
+   | Environment | Startup log | `$execution.resumeUrl` |
+   |---|---|---|
+   | only `N8N_WEBHOOK_URL=https://example.test/` | "Editor is now accessible via: https://example.test", no warning | `https://example.test/webhook-waiting/1?signature=…` |
+   | only `WEBHOOK_URL=https://example.test/` | same, plus "WEBHOOK_URL -> Use N8N_WEBHOOK_URL instead" | `https://example.test/webhook-waiting/1?signature=…` |
+   | neither | "http://localhost:5678" | `http://localhost:<port>/webhook-waiting/1?signature=…` |
+
+   Both work, so #1 was a false positive (the original `N8N_WEBHOOK_URL` was fine). `docker-compose.yml` and
+   `docker-compose.prod.yml` set `N8N_WEBHOOK_URL` again; `docker-compose.yml` falls back to an older `.env`'s
+   `WEBHOOK_URL`. `docker compose config` (dummy env outside the repo) shows `N8N_WEBHOOK_URL` on n8n and
+   n8n-worker: `http://localhost:5678/` by default, `https://<N8N_DOMAIN>/` with the prod overlay, and the legacy
+   value when only `WEBHOOK_URL` is set.
+5. `scripts/import_workflows.sh` prints "Restarted n8n and n8n-worker", or the restart's output and exits 1.
+
+## Bugs found and fixed
+
+- **D. No Slack card after Retry of an email whose card was already posted.** WF2 claimed the card once per email
+  (`slack_alert:<id>:approval`). When a run failed after posting its card (the `resumed_failure` scenario), Retry
+  drafted again but the claim said *done*: no new card, and the old card's buttons pointed at the finished
+  execution, so the email could only be approved in the dashboard. The key now ends in the draft id
+  (`slack_alert:<id>:approval:<draft_id>`): overlapping runs still share one card (they get the same saved draft),
+  a new draft gets its own, and an older card's Approve is refused as stale (#16).
+- **E. Stale CRLF in an older worktree.** A worktree checked out before `.gitattributes` (bug C) kept CRLF in
+  `docker/postgres-init.sh` and postgres created no databases. Not a repository problem (the index is LF);
+  re-checking out the scripts fixes it.
+
+## Second end-to-end run (fresh `aiops-obs` stack, n8n 2.43.2 queue mode, mocks)
+
+`dev/e2e_scenarios.py` gained the scenario `resumed_failure`, and `draft_errors` / `metrics` check the new
+behaviour. All 12 scenarios pass:
+
+| Scenario | Checks | Result |
+|---|---|---|
+| `happy` | as before (7 categories × 3 runs; one card each with the per-draft claim key) | PASS |
+| `late_rerun` | as before | PASS |
+| `refusal` | as before | PASS |
+| `retry` | as before | PASS |
+| `draft_errors` (obs. 1, #14) | (a) Anthropic 500 while drafting → `/draft` 503 `retry:true` ("AI service unavailable … InternalServerError"), WF2 error at *Draft failed*, email `failed`, no Draft row, `needed_review_at` empty, 1 Failure, 1 `#ops-alerts`, no review alert; Retry → 1 LLM call (triage reused), ok draft + card, failure resolved. (c) Anthropic 529 while classifying → `/triage` 503, WF2 error at *Triage failed* ("Triage not possible now: … OverloadedError"), no Triage row; Retry → 3 LLM calls, one Triage row, card. (b) malformed answer → `/draft` 500 → *Draft failed*, Retry reuses the triage | PASS |
+| `approval_errors` | as before | PASS |
+| `stale` | as before | PASS |
+| `send_uncertain` | as before | PASS |
+| `race` | as before | PASS |
+| `timeout` | as before | PASS |
+| `resumed_failure` (obs. 3) | Overlapping WF2 run → email's last execution is the overlapping one; the card's run resumes after Approve and fails at *Send reply (WF3)* ("Invalid input for 'draft_id'", bug A replayed in that execution's stored copy of WF2) before calling Django → Failure attached to the email with the resumed run's execution id, email `failed`, nothing sent, 1 `#ops-alerts`, no unattached Failure; Retry → new card (bug D fix), Approve → 1 reply, failure resolved | PASS |
+| `metrics` (obs. 2, #17) | counters match the database; automatic/reviewed (4/14) match the same definition computed in SQL with `needed_review_at`; the `stale` email (re-drafted, Slack approval refused, dashboard Approve unchanged, no review alert) has `needed_review_at` and counts as reviewed; WF5 digest text matches | PASS |
+
+`pytest` (CI way: postgres:17, python:3.12-slim): 223 passed (201 before); `makemigrations --check`: no changes.
