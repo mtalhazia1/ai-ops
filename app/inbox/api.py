@@ -22,7 +22,7 @@ from .cleaning import clean_body
 from .llm.client import LLMUnavailable
 from .llm.draft import reply_subject
 from .llm.triage import EmailInput, triage
-from .models import Action, Approval, Draft, Email, Failure, Status, Triage
+from .models import Action, Approval, Draft, Email, EmailExecution, Failure, Status, Triage
 from .services import release_pending_claims
 
 
@@ -41,13 +41,24 @@ _EMAIL_PATH = re.compile(r"/internal/emails/(\d+)(/|$)")
 
 
 def _note_execution(request) -> None:
-    """Remember which n8n execution last worked on an email (header X-N8N-Execution-Id).
-    Saved straight away, outside any transaction, so it survives a failing request."""
+    """Remember which n8n executions worked on an email (header X-N8N-Execution-Id): the
+    last one on the email, and every one in EmailExecution. Saved straight away, outside any
+    transaction, so it survives a failing request."""
     execution_id = (request.headers.get("X-N8N-Execution-Id") or "").strip()[:100]
     match = _EMAIL_PATH.search(request.path)
     if execution_id and match:
-        Email.objects.filter(pk=int(match.group(1))).exclude(last_execution_id=execution_id).update(
-            last_execution_id=execution_id)
+        email_id = int(match.group(1))
+        # Only when the last execution changes (one write per run, not per call). The update
+        # also proves the email exists before the row that points at it is inserted.
+        if Email.objects.filter(pk=email_id).exclude(last_execution_id=execution_id).update(
+                last_execution_id=execution_id):
+            _record_execution(email_id, execution_id)
+
+
+def _record_execution(email_id: int, execution_id: str) -> None:
+    if execution_id:
+        EmailExecution.objects.bulk_create([EmailExecution(email_id=email_id, execution_id=execution_id)],
+                                           ignore_conflicts=True)
 
 
 api = NinjaAPI(title="AI Ops Inbox internal API", auth=InternalToken(), urls_namespace="internal", docs_url=None)
@@ -173,6 +184,7 @@ def create_email(request, payload: EmailIn):
     except IntegrityError:  # lost a race with a parallel execution
         email = Email.objects.get(gmail_message_id=payload.gmail_message_id)
         return {"id": email.id, "created": False, "status": email.status}
+    _record_execution(email.id, email.last_execution_id)
     return {"id": email.id, "created": True, "status": email.status}
 
 
@@ -556,13 +568,15 @@ class FailureIn(Schema):
 @api.post("/failures")
 def record_failure(request, payload: FailureIn):
     """WF4: one row per failed execution. The email is the one named in the payload, or
-    else the one this execution last worked on."""
+    else the one this execution worked on: any call it made counts, not only the latest
+    call to that email, so a resumed run that fails before calling Django again is still
+    found after another run touched the email."""
     email = None
     if payload.email_id:
         email = Email.objects.filter(pk=payload.email_id).first()
     elif payload.execution_id:
         # One WF1 run can take in several emails; only attach when the match is unambiguous.
-        matches = list(Email.objects.filter(last_execution_id=payload.execution_id)[:2])
+        matches = list(Email.objects.filter(executions__execution_id=payload.execution_id[:100]).distinct()[:2])
         email = matches[0] if len(matches) == 1 else None
     failure = Failure.objects.create(
         email=email,

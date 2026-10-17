@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from inbox import metrics, services, state
-from inbox.models import Action, Approval, Draft, Email, Failure, Triage
+from inbox.models import Action, Approval, Draft, Email, EmailExecution, Failure, Triage
 
 from .conftest import TOKEN
 from .test_m1_intake import PAYLOAD
@@ -216,3 +216,42 @@ def test_needed_review_at_is_set_once_and_never_cleared(api, fake_llm):
     plain = _today(api, fake_llm, "plain-fail")
     _fail(api, plain)
     assert Email.objects.get(pk=plain).needed_review_at is None
+
+
+def _touch(client, email_id, execution_id):
+    client.get(f"/internal/emails/{email_id}", HTTP_X_INTERNAL_TOKEN=TOKEN, HTTP_X_N8N_EXECUTION_ID=execution_id)
+
+
+def test_every_execution_is_remembered(api, client, db):
+    email_id = client.post("/internal/emails", data=PAYLOAD, content_type="application/json",
+                           HTTP_X_INTERNAL_TOKEN=TOKEN, HTTP_X_N8N_EXECUTION_ID="10").json()["id"]
+    for execution_id in ("11", "11", "12", "11"):
+        _touch(client, email_id, execution_id)
+    _touch(client, 999999, "13")  # no such email: nothing recorded, no error
+    executions = EmailExecution.objects.filter(email_id=email_id).values_list("execution_id", flat=True)
+    assert sorted(executions) == ["10", "11", "12"]
+    assert Email.objects.get(pk=email_id).last_execution_id == "11"
+    assert not EmailExecution.objects.filter(execution_id="13").exists()
+
+
+def test_resumed_run_failure_is_attached_after_another_run(api, client, fake_llm):
+    """A resumed approval run (same execution id) fails before calling Django again, after an
+    overlapping run touched the email: the failure still finds the email."""
+    email_id, _ = _triaged(api, fake_llm)
+    _touch(client, email_id, "200")  # the run that posted the Slack card and waits
+    _touch(client, email_id, "201")  # an overlapping run, now the email's last execution
+    assert Email.objects.get(pk=email_id).last_execution_id == "201"
+    body = api("post", "/failures", {"workflow": "WF2 Process", "node": "Run WF3 (approved)",
+                                     "error": "Invalid input for 'draft_id'", "execution_id": "200"}).json()
+    assert body["email_id"] == email_id and body["email_status"] == "failed"
+    assert Failure.objects.get().email_id == email_id
+
+
+def test_execution_that_touched_two_emails_is_not_attached(api, client, fake_llm):
+    first, _ = _triaged(api, fake_llm)
+    second, _ = _triaged(api, fake_llm, {**PAYLOAD, "gmail_message_id": "other"})
+    _touch(client, first, "300")
+    _touch(client, second, "300")
+    _touch(client, second, "301")  # only `first` still has 300 as its last execution
+    body = api("post", "/failures", {"workflow": "WF1 Intake", "node": "x", "error": "y", "execution_id": "300"}).json()
+    assert body["email_id"] is None

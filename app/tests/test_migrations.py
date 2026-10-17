@@ -49,3 +49,13 @@ def test_needed_review_at_backfill(migrator):
     assert marked == {"routed", "blocked", "alerted", "stale", "waiting"}
     routed_at = Email.objects.get(gmail_message_id="routed").needed_review_at
     assert abs(routed_at - timezone.now()) < timedelta(minutes=5)
+
+
+def test_email_execution_backfill(migrator):
+    apps = migrator(("inbox", "0004_email_needed_review_at"))
+    Email = apps.get_model("inbox", "Email")
+    known = _email(Email, "known", last_execution_id="42")
+    _email(Email, "unknown")
+    apps = migrator(("inbox", "0005_emailexecution"))
+    EmailExecution = apps.get_model("inbox", "EmailExecution")
+    assert list(EmailExecution.objects.values_list("email_id", "execution_id")) == [(known.id, "42")]

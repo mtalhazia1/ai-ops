@@ -177,9 +177,12 @@ a *Stop and Error* node, a trigger failure):
 
 1. **Failure details** (Code): workflow, node, error message, execution ID and URL from the Error Trigger.
 2. **Record failure** → `POST /internal/failures`. n8n's error payload doesn't say which email failed, so
-   every internal call from WF1–WF3 sends the header `X-N8N-Execution-Id`, and Django remembers the last
-   execution per email. Django finds the email, saves a `Failure`, moves the email to `failed`, frees the
-   claims the run held, and returns the alert text.
+   every internal call from WF1–WF3 sends the header `X-N8N-Execution-Id`, and Django remembers every
+   execution that called it for an email (`EmailExecution`). So a resumed approval run (a Wait node keeps
+   its execution id) that fails before calling Django again is still tied to its email after another run
+   touched it; an execution that touched several emails (a WF1 batch) is not attached to any. Django finds
+   the email, saves a `Failure`, moves the email to `failed`, frees the claims the run held, and returns
+   the alert text.
 3. **Slack `#ops-alerts`**: "⚠️ WF2 Process failed at HubSpot upsert contact: …" with links to the email
    in the dashboard and to the execution in n8n. If Django itself is down, a plain alert is still posted.
 
