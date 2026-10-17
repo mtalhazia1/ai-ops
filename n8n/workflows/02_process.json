@@ -109,7 +109,12 @@
         "method": "POST",
         "url": "={{ $env.APP_URL }}/internal/emails/{{ $json.email_id }}/triage",
         "options": {
-          "timeout": 120000
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
         },
         "sendHeaders": true,
         "headerParameters": {
@@ -2394,8 +2399,8 @@
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
       "position": [
-        5100,
-        760
+        5320,
+        840
       ]
     },
     {
@@ -2513,6 +2518,143 @@
         6860,
         820
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bcd22471-c82f-5aa8-9555-316c4406015d",
+              "leftValue": "={{ typeof $json.category === 'string' && $json.current === undefined }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7945d23d-0e8e-5cf1-9f8f-d5d6b8fdb7f8",
+      "name": "Triaged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a5b9b857-44e4-539d-bf30-0833ffac58ef",
+              "leftValue": "={{ ['awaiting_approval', 'approved', 'done', 'rejected', 'ignored'].includes($json.current) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2ed6ef5d-037f-552d-b941-14a5cf9fcb0a",
+      "name": "Already past WF2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -260
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "20984792-3c6c-5428-bac0-f2de3e8d8de8",
+      "name": "Already processed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        -340
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Unexpected answer from /triage: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+      },
+      "id": "597f16c6-68c9-5c93-b700-341a6a77717e",
+      "name": "Triage failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1e8b265f-f402-58c3-b330-c4755f5ce014",
+              "leftValue": "={{ $json.retry !== true && ['needs_review', 'rejected', 'ignored'].includes($json.current) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3c0f658a-e77c-5c36-83c2-65e64dd27b19",
+      "name": "In review meanwhile?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5100,
+        760
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "eedf0c10-7a0a-5f62-8501-b449e2d2b586",
+      "name": "Left to the reviewer",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        5320,
+        680
+      ]
     }
   ],
   "connections": {
@@ -2564,7 +2706,7 @@
       "main": [
         [
           {
-            "node": "Needs review?",
+            "node": "Triaged?",
             "type": "main",
             "index": 0
           }
@@ -3396,7 +3538,7 @@
         ],
         [
           {
-            "node": "Draft failed",
+            "node": "In review meanwhile?",
             "type": "main",
             "index": 0
           }
@@ -3433,6 +3575,60 @@
         [
           {
             "node": "Approval timeout failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Triaged?": {
+      "main": [
+        [
+          {
+            "node": "Needs review?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already past WF2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already past WF2?": {
+      "main": [
+        [
+          {
+            "node": "Already processed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Triage failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "In review meanwhile?": {
+      "main": [
+        [
+          {
+            "node": "Left to the reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Draft failed",
             "type": "main",
             "index": 0
           }
