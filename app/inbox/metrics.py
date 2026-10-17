@@ -7,9 +7,10 @@ Definitions:
   clicking Approve in the dashboard without changing the text) is the normal human sign-off
   every reply needs in v1, so it does not make a reply "reviewed". A failure followed by a
   Retry does not either: failures are counted separately.
-- reviewed: emails where a person had to step in: routed to needs_review at some point
-  (triage route "review", a blocked draft, a review alert, or sitting in review now), a
-  person corrected the triage in the dashboard, or the reply was edited before sending.
+- reviewed: emails where a person had to step in: in needs_review at some point
+  (`Email.needed_review_at`: triage route "review", a blocked draft, the approval timeout, a
+  stale Slack approval, ...), a blocked draft from a dashboard Re-draft, a person corrected the
+  triage in the dashboard, or the reply was edited before sending.
 - time to reply: from Gmail receipt to the reply being sent (replies sent in the period).
 """
 
@@ -20,7 +21,7 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Sum
 from django.utils import timezone
 
 from .models import Action, Approval, Category, Draft, Email, Failure, Status, Triage
@@ -38,10 +39,6 @@ def _minutes(delta: timedelta) -> float:
     return round(delta.total_seconds() / 60, 1)
 
 
-# Every WF2 path into needs_review claims this Slack alert key (see 02_process.json).
-REVIEW_ALERT_KEY = "slack_alert:{id}:review"
-
-
 def needed_human(email_ids) -> set[int]:
     """The emails among `email_ids` that a person had to handle (see "reviewed" above).
 
@@ -51,14 +48,11 @@ def needed_human(email_ids) -> set[int]:
     ids = set(email_ids)
     if not ids:
         return set()
-    found = set(Triage.objects.filter(email_id__in=ids)
-                .filter(Q(route="review") | Q(model_classify__startswith="human:"))
-                .values_list("email_id", flat=True))
-    found |= set(Draft.objects.filter(email_id__in=ids, ok=False).values_list("email_id", flat=True))
-    found |= set(Approval.objects.filter(email_id__in=ids, decision="edited").values_list("email_id", flat=True))
-    found |= set(Email.objects.filter(id__in=ids, status=Status.NEEDS_REVIEW).values_list("id", flat=True))
-    keys = {REVIEW_ALERT_KEY.format(id=i): i for i in ids - found}
-    found |= {keys[k] for k in Action.objects.filter(idempotency_key__in=keys).values_list("idempotency_key", flat=True)}
+    found = set(Email.objects.filter(id__in=ids, needed_review_at__isnull=False).values_list("id", flat=True))
+    found |= set(Triage.objects.filter(email_id__in=ids - found, model_classify__startswith="human:")
+                 .values_list("email_id", flat=True))
+    found |= set(Draft.objects.filter(email_id__in=ids - found, ok=False).values_list("email_id", flat=True))
+    found |= set(Approval.objects.filter(email_id__in=ids - found, decision="edited").values_list("email_id", flat=True))
     return found
 
 

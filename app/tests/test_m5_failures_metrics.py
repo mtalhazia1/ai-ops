@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from inbox import metrics
+from inbox import metrics, services, state
 from inbox.models import Action, Approval, Draft, Email, Failure, Triage
 
 from .conftest import TOKEN
@@ -160,11 +160,10 @@ def test_review_routed_reply_counts_as_reviewed(api, fake_llm):
     assert Email.objects.get(pk=routed).status == "needs_review"
     Draft.objects.create(email_id=routed, subject="Re: rate pls", body="Thanks for your request.")
     _send(api, routed, channel="dashboard", reviewer="ops")
-    # No decision in Slack in time: WF2 moved it to review and claimed the review alert.
+    # No decision in Slack in time: WF2 moved it to review (the email records that by itself).
     timed_out = _today(api, fake_llm, "timeout")
     api("post", f"/emails/{timed_out}/status", {"status": "needs_review", "reason": "No decision in Slack"})
-    api("post", f"/emails/{timed_out}/actions",
-        {"kind": "slack_alert", "idempotency_key": f"slack_alert:{timed_out}:review"})
+    assert Email.objects.get(pk=timed_out).needed_review_at is not None
     _send(api, timed_out, channel="dashboard", reviewer="ops")
     # A plain Slack approval of an untouched draft stays automatic.
     plain = _today(api, fake_llm, "plain")
@@ -184,3 +183,36 @@ def test_triage_corrected_by_a_person_counts_as_reviewed(api, fake_llm):
     _send(api, email_id)
     m = metrics.compute("today")
     assert m["automatic"] == 0 and m["reviewed"] == 1
+
+
+def test_stale_slack_approval_then_dashboard_approve_counts_as_reviewed(api, fake_llm):
+    # The Slack card showed the first draft; someone re-drafted in the dashboard, then the old
+    # Slack Approve was refused (stale) and the email went to review without a review alert.
+    email_id = _today(api, fake_llm, "stale")
+    shown = Email.objects.get(pk=email_id).latest_draft.id
+    services.create_draft(Email.objects.get(pk=email_id))  # dashboard Re-draft (ok draft)
+    refused = api("post", f"/emails/{email_id}/approval", {"decision": "approved", "draft_id": shown})
+    assert refused.status_code == 409 and refused.json()["stale_draft"] is True
+    email = Email.objects.get(pk=email_id)
+    assert email.status == "needs_review" and email.needed_review_at is not None
+    assert not Action.objects.filter(kind="slack_alert").exists() and not Draft.objects.filter(ok=False).exists()
+    # Approved unchanged from the dashboard: still counted as reviewed.
+    _send(api, email_id, channel="dashboard", reviewer="ops")
+    assert Approval.objects.get(email_id=email_id).decision == "approved"
+    m = metrics.compute("today")
+    assert m["replies_sent"] == 1 and m["automatic"] == 0 and m["reviewed"] == 1
+
+
+def test_needed_review_at_is_set_once_and_never_cleared(api, fake_llm):
+    email_id = _today(api, fake_llm, "once", draft=False, classification={"category": "other"})
+    first = Email.objects.get(pk=email_id).needed_review_at
+    assert first is not None
+    # Re-drafted after a correction: needs_review -> awaiting_approval -> needs_review again.
+    state.transition(Email.objects.get(pk=email_id), "awaiting_approval")
+    assert Email.objects.get(pk=email_id).needed_review_at == first
+    state.transition(Email.objects.get(pk=email_id), "needs_review", reason="again")
+    assert Email.objects.get(pk=email_id).needed_review_at == first
+    # A failure doesn't set it.
+    plain = _today(api, fake_llm, "plain-fail")
+    _fail(api, plain)
+    assert Email.objects.get(pk=plain).needed_review_at is None
