@@ -261,9 +261,10 @@ dashboard superuser `e2e` (password `E2E_PASSWORD`, default `e2e-pass-123`) to p
 Approve and "Send again anyway".
 
 ```bash
-python dev/e2e_scenarios.py            # all, about 8 minutes (the timeout scenario waits for it)
+python dev/e2e_scenarios.py            # all, about 10 minutes (the timeout scenario waits for it)
 python dev/e2e_scenarios.py --list     # happy, late_rerun, refusal, retry, draft_errors, approval_errors,
-                                       # stale, send_uncertain, race, timeout, resumed_failure, metrics
+                                       # stale, send_uncertain, race, timeout, resumed_failure,
+                                       # cleaning, naive_date, retry_n8n_down, purge, metrics
 python dev/e2e_scenarios.py refusal retry
 ```
 
@@ -280,6 +281,10 @@ python dev/e2e_scenarios.py refusal retry
 | `race` | Two runs on one paperwork email with a slow refused upload: the second stops at *Another run drafts*, no "received" draft |
 | `timeout` | No click → review after the timeout; a dashboard decision meanwhile → *Already decided* |
 | `resumed_failure` | An overlapping run touches the email, then the card's resumed run fails at *Send reply (WF3)* before calling Django (bug A replayed in that execution's copy of WF2): the Failure is still attached to the email; Retry posts a new card, Approve sends once |
+| `cleaning` | A quote laid out as `From: Lahore` / `To: Karachi` / ... keeps its lane (extracted, not asked for in the draft); a real Outlook quoted reply is still cut at its header block |
+| `naive_date` | Date headers with `-0000`, no zone, or naive ISO are saved as UTC (intake 200) and run through to an approval card |
+| `retry_n8n_down` | Stops the `n8n` container: dashboard Retry says "n8n unreachable", the email stays `failed` with Retry offered; after `n8n` is started again Retry finishes it |
+| `purge` | Backdates four emails 100 days and runs `purge_old_bodies`: only the done and rejected ones are blanked; the old open email's Slack Approve sends its real draft; a draft blanked anyway is refused at `/approval` and nothing is sent |
 | `metrics` | `/internal/metrics?period=today` matches the database, including automatic vs reviewed (`needed_review_at`); WF5 *Run now* posts the same digest text |
 
 Never import the mock credentials into a real deployment.

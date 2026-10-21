@@ -180,13 +180,18 @@ def short(execution):
 
 # --- Django -------------------------------------------------------------------------------
 
-def new_email(name, *, subject, text, attachments=(), sender=SENDER):
+def new_email(name, *, subject, text, attachments=(), sender=SENDER, date=None):
     status, body = request(f"{APP}/internal/emails", {
         "gmail_message_id": f"e2e-{STAMP}-{name}", "gmail_thread_id": f"t-{STAMP}-{name}",
         "from": sender, "subject": subject, "text": text, "message_id": f"<e2e-{STAMP}-{name}@acme.example>",
-        "attachments": list(attachments)}, {"X-Internal-Token": ENV["INTERNAL_TOKEN"]})
+        "attachments": list(attachments), **({"date": date} if date else {})}, {"X-Internal-Token": ENV["INTERNAL_TOKEN"]})
     assert status == 200, (status, body)
     return body["id"]
+
+
+def sql_exec(db, statement):
+    """Run a write statement with psql inside the postgres container."""
+    return dc("exec", "-T", "postgres", "psql", "-U", "postgres", "-d", db, "-v", "ON_ERROR_STOP=1", "-At", "-c", statement)
 
 
 def run_wf2(email_id):
@@ -848,6 +853,186 @@ def s_metrics(r):
     r.check(x and x[-1]["status"] == "success", f"WF5 {short(x[-1])}" if x else "WF5 ran")
 
 
+LANE_TEXT = ("Hi,\nPlease quote for the shipment below.\n\nFrom: Lahore\nTo: Karachi\nWeight: 1200 kg\n"
+             "Pieces: 4 pallets\nPickup date: 25 Oct\n\nThanks")
+OUTLOOK_TEXT = ("Thanks, see you then.\n\nFrom: Ops Desk <ops@carrier.example>\nSent: Monday, 12 October 2026 10:00\n"
+                "To: Sarah Khan <sarah@acme.example>\nSubject: RE: rate\n\nWe can move 4 pallets Lahore to Karachi.")
+
+
+def s_cleaning(r):
+    """#11: a quote laid out as "From: Lahore / To: Karachi / ..." keeps its lane; a real Outlook
+    quoted reply is still cut at its header block."""
+    mock("/_reset", {})
+    lane = new_email("lane", subject="rate pls lane", text=LANE_TEXT)
+    outlook = new_email("outlook", subject="Re: rate", text=OUTLOOK_TEXT)
+    e = email(lane)
+    r.check("From: Lahore" in e["body_clean"] and "Pickup date: 25 Oct" in e["body_clean"],
+            f"lane email: cleaned body keeps the lane block ({len(e['body_clean'])} of {len(e['body_text'])} chars)")
+    o = email(outlook)
+    r.check(o["body_clean"].strip() == "Thanks, see you then.", f"Outlook reply cut at its header: {o['body_clean']!r}")
+    run_wf2(lane)
+    wait_status(lane, "awaiting_approval", "needs_review", "failed", timeout=120)
+    quiet()
+    t = rows("triage", lane)[-1]
+    r.note(f"triage: {t['category']} route {t['route']}, fields {json.dumps(t['fields'])[:200]}, missing {t['missing_fields']}")
+    r.check(t["category"] == "quote_request", f"category {t['category']}")
+    fields = json.dumps(t["fields"])
+    r.check("Lahore" in fields and "Karachi" in fields, "origin Lahore and destination Karachi extracted")
+    asked = " ".join(t["missing_fields"]).lower()
+    r.check("origin" not in asked and "destination" not in asked, f"lane not in missing_fields {t['missing_fields']}")
+    d = rows("draft", lane)
+    r.check(d and d[-1]["ok"] and "origin" not in d[-1]["body"].lower() and "destination" not in d[-1]["body"].lower(),
+            "draft does not ask for origin/destination")
+    if d:
+        r.note("draft: " + d[-1]["body"].replace("\n", " | ")[:300])
+    r.check(status_of(lane) == "awaiting_approval" and approval_buttons(lane), f"lane email {status_of(lane)}, approval card")
+    finish(r, [lane])
+
+
+def finish(r, ids):
+    """Approve the scenario's open cards so no email times out into review during a later scenario."""
+    for email_id in ids:
+        if approval_buttons(email_id):
+            click(approval_buttons(email_id)["Approve and send"])
+    for email_id in ids:
+        wait_status(email_id, "done", "failed", "needs_review")
+    quiet()
+    r.check(all(status_of(i) == "done" and len(sent_for(i)) == 1 for i in ids), f"approved: {len(ids)} email(s) done, 1 reply each")
+
+
+def s_naive_date(r):
+    """#12: Date headers without a zone (or -0000) are saved as UTC and the email runs normally."""
+    mock("/_reset", {})
+    cases = [("date_minus0000", "Mon, 12 Oct 2026 10:15:00 -0000", "2026-10-12 10:15:00+00"),
+             ("date_nozone", "Mon, 12 Oct 2026 10:15:00", "2026-10-12 10:15:00+00"),
+             ("date_iso_naive", "2026-10-12T10:15:00", "2026-10-12 10:15:00+00"),
+             ("date_karachi", "Mon, 12 Oct 2026 15:15:00 +0500", "2026-10-12 10:15:00+00")]
+    ids = {}
+    for name, header, expected in cases:
+        try:
+            ids[name] = new_email(name, subject=f"rate pls {name}", text=QUOTE["text"], date=header)
+        except AssertionError as exc:
+            r.check(False, f"{name}: intake {header!r} -> {exc}")
+            continue
+        got = sql("inbox", f"select received_at at time zone 'UTC' as utc from inbox_email where id = {ids[name]}")[0]["utc"]
+        r.check(got.startswith(expected[:19].replace(" ", "T")) or got.startswith(expected[:19]),
+                f"{name}: intake 200, {header!r} saved as {got} UTC")
+    for name, email_id in ids.items():
+        run_wf2(email_id)
+    for name, email_id in ids.items():
+        wait_status(email_id, "awaiting_approval", "needs_review", "failed", timeout=120)
+    quiet()
+    for name, email_id in ids.items():
+        r.check(status_of(email_id) == "awaiting_approval" and approval_buttons(email_id),
+                f"{name}: WF2 -> {status_of(email_id)}, approval card")
+    r.check(not sql("inbox", f"select id from inbox_failure where email_id in ({','.join(map(str, ids.values()))})"),
+            "no Failure rows")
+    finish(r, list(ids.values()))
+
+
+def s_retry_n8n_down(r):
+    """#13: Retry while n8n is down leaves the email failed (and retryable); Retry after it is back works."""
+    mock("/_reset", {})
+    faults({"id": "down", "target": "anthropic", "kind": "draft", "match": "n8ndown", "status": 500})
+    since = last_execution_id()
+    email_id = quote_email("n8ndown", subject="rate pls n8ndown")
+    run_wf2(email_id)
+    wait_status(email_id, "failed", timeout=150)
+    quiet()
+    clear_faults()
+    failures = rows("failure", email_id)
+    r.check(len(failures) == 1 and not failures[0]["resolved"], f"email failed with 1 open Failure ({failures[0]['node'] if failures else None})")
+    board = dashboard()
+    dc("stop", "n8n")
+    try:
+        try:
+            page = board.post(f"/emails/{email_id}/retry/", {"next": f"/emails/{email_id}/"})
+            flashes = Dashboard.flashes(page)
+            r.check(any("Retry failed" in f and "n8n" in f for f in flashes), f"Retry with n8n stopped -> flash {flashes}")
+        except urllib.error.HTTPError as exc:
+            r.check(False, f"Retry with n8n stopped -> HTTP {exc.code}")
+        e = email(email_id)
+        r.check(e["status"] == "failed", f"email still {e['status']} (not stuck in received)")
+        r.check(not rows("failure", email_id)[0]["resolved"], "Failure still open")
+        page = board.get(f"/emails/{email_id}/")
+        r.check(f"/emails/{email_id}/retry/" in page, "email page still offers Retry")
+        r.check(f"/emails/{email_id}/" in board.get("/failures/"), "email listed on the failures page")
+    finally:
+        dc("start", "n8n")
+    wait_until(lambda: _webhook_ready(), 180, every=3, what="WF2's webhook after restarting n8n")
+    since2 = last_execution_id()
+    page = board.post(f"/emails/{email_id}/retry/", {"next": f"/emails/{email_id}/"})
+    r.note(f"Retry after n8n is back: {Dashboard.flashes(page)}")
+    wait_status(email_id, "awaiting_approval", timeout=150)
+    quiet()
+    x = executions("wf2", email_id, since2)
+    r.check(x and x[-1]["status"] == "waiting", f"retry WF2 {short(x[-1])}" if x else "retry WF2 ran")
+    r.check(all(f["resolved"] for f in rows("failure", email_id)), "Failure resolved")
+    r.check(len(rows("draft", email_id)) == 1 and approval_buttons(email_id), "ok draft and approval card")
+    finish(r, [email_id])
+
+
+def purge(days=90):
+    return dc("exec", "-T", "app", "python", "manage.py", "purge_old_bodies", f"--days={days}").strip()
+
+
+def s_purge(r):
+    """#20: the 90-day purge blanks only closed emails; an old open email keeps its text and
+    its approval sends the real reply; a purged draft is never sent."""
+    from_mail = "[deleted after retention period]"
+    mock("/_reset", {})
+    ids = {name: quote_email(f"purge_{name}") for name in ("done", "rejected", "open", "guard")}
+    for email_id in ids.values():
+        run_wf2(email_id)
+    for email_id in ids.values():
+        wait_card(email_id, timeout=120)
+    quiet()
+    r.check(click(approval_buttons(ids["done"])["Approve and send"]) == 200, "approved 'done' in Slack")
+    r.check(click(approval_buttons(ids["rejected"])["Reject"]) == 200, "rejected 'rejected' in Slack")
+    wait_status(ids["done"], "done")
+    wait_status(ids["rejected"], "rejected")
+    quiet()
+    open_body = rows("draft", ids["open"])[-1]["body"]
+    sql_exec("inbox", f"update inbox_email set received_at = now() - interval '100 days' "
+                      f"where id in ({','.join(map(str, ids.values()))})")
+    out = purge()
+    r.note(f"purge_old_bodies: {out}")
+    purged = sql("inbox", f"select id from inbox_email where body_text = '{from_mail}' and id in ({','.join(map(str, ids.values()))})")
+    r.check(sorted(x["id"] for x in purged) == sorted([ids["done"], ids["rejected"]]),
+            "of this scenario's 4 emails, exactly the 2 closed ones were purged")
+    for name in ("done", "rejected"):
+        e, d, a = email(ids[name]), rows("draft", ids[name]), rows("approval", ids[name])
+        r.check(e["body_text"] == from_mail and e["body_clean"] == from_mail and all(x["body"] == from_mail for x in d)
+                and all(x["final_body"] == from_mail for x in a) and e["status"] == name,
+                f"{name}: body, {len(d)} draft(s), {len(a)} approval(s) purged; status, category, actions kept "
+                f"({len(rows('action', ids[name]))} actions)")
+    for name in ("open", "guard"):
+        e, d = email(ids[name]), rows("draft", ids[name])
+        r.check(e["status"] == "awaiting_approval" and e["body_text"] != from_mail and d[-1]["body"] != from_mail,
+                f"{name}: still awaiting_approval, body and draft kept")
+    r.check(purge().startswith("Purged bodies of 0 emails"), "second purge: nothing left to purge")
+    # The old open email: approving it sends the real draft.
+    sent_before = len(mock_state()["sent"])
+    r.check(click(approval_buttons(ids["open"])["Approve and send"]) == 200, "approved the old open email in Slack")
+    wait_status(ids["open"], "done", "failed")
+    quiet()
+    sent = sent_for(ids["open"])
+    r.check(len(sent) == 1 and sent[0]["body"].strip() == open_body.strip() and from_mail not in sent[0]["body"],
+            f"open: 1 reply with the real draft text ({len(sent)} sent, status {status_of(ids['open'])})")
+    # Guard: a draft that was purged anyway (older code, or a hand edit) must never go out.
+    sql_exec("inbox", f"update inbox_draft set body = '{from_mail}' where email_id = {ids['guard']}")
+    since = last_execution_id()
+    r.check(click(approval_buttons(ids["guard"])["Approve and send"]) == 200, "approved the purged-draft email in Slack")
+    wait_status(ids["guard"], "failed", "needs_review", "done")
+    quiet()
+    r.check(not sent_for(ids["guard"]), f"guard: nothing sent, email {status_of(ids['guard'])}")
+    x = executions("wf3", ids["guard"], since)
+    r.note("WF3: " + "; ".join(short(e) for e in x))
+    f = rows("failure", ids["guard"])
+    r.note(f"guard failures: {[(x['node'], x['error'][:120]) for x in f]}; reason: {email(ids['guard'])['needs_review_reason'][:150]}")
+    r.check(len(mock_state()["sent"]) - sent_before == 1, "only the open email's reply was sent in this step")
+
+
 SCENARIOS = {
     "happy": ("1. happy paths, --runs 3, approve/reject", s_happy),
     "late_rerun": ("1b. WF2 rerun after the approval card", s_rerun_after_draft),
@@ -860,6 +1045,10 @@ SCENARIOS = {
     "race": ("#2 concurrent runs, slow refused upload", s_race),
     "timeout": ("9. approval timeout / decided meanwhile", s_timeout),
     "resumed_failure": ("obs.3 resumed run fails after an overlapping run", s_resumed_failure),
+    "cleaning": ("#11 'From: city / To: city' quote keeps its lane; Outlook reply still cut", s_cleaning),
+    "naive_date": ("#12 Date headers without a time zone", s_naive_date),
+    "retry_n8n_down": ("#13 Retry while n8n is down, then after it is back", s_retry_n8n_down),
+    "purge": ("#20 90-day purge: closed only; old open email sends its real reply", s_purge),
     "metrics": ("10. #17/obs.2 metrics and WF5 digest", s_metrics),
 }
 

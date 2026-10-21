@@ -44,8 +44,8 @@ Verified end to end on 2026-10-17 (see "End-to-end run" below): #2, #3, #5, #7, 
 each publish) in n8n 2.43.2 against the mocks. #1 turned out to be a false positive: n8n 2.43.2 reads both
 `N8N_WEBHOOK_URL` and the deprecated `WEBHOOK_URL`, so the original setting already worked.
 
-Still not verified:
-- #6 (template) and #10 (backup retention) were not run.
+Still not verified: ~~#6 (template) and #10 (backup retention) were not run~~ — both run on 2026-10-20, see
+"Third end-to-end run" at the end.
 - (`scripts/import_workflows.sh` hiding the output of `dc restart`: fixed and run on 2026-10-17.)
 
 ---
@@ -110,7 +110,8 @@ Known gaps:
   moved there by an expired claim still has no message.
 - ~~`metrics.REVIEW_ALERT_KEY` must match WF2's `slack_alert:<id>:review` key~~ — gone on 2026-10-17: metrics read
   `Email.needed_review_at` instead.
-- Not run end to end: #11, #12, #13 (n8n down during Retry), #20 (purge); they are covered by pytest only.
+- ~~Not run end to end: #11, #12, #13 (n8n down during Retry), #20 (purge); they are covered by pytest only.~~
+  All four run end to end on 2026-10-20, see "Third end-to-end run" at the end.
 
 ---
 
@@ -255,3 +256,45 @@ behaviour. All 12 scenarios pass:
 | `metrics` (obs. 2, #17) | counters match the database; automatic/reviewed (4/14) match the same definition computed in SQL with `needed_review_at`; the `stale` email (re-drafted, Slack approval refused, dashboard Approve unchanged, no review alert) has `needed_review_at` and counts as reviewed; WF5 digest text matches | PASS |
 
 `pytest` (CI way: postgres:17, python:3.12-slim): 223 passed (201 before); `makemigrations --check`: no changes.
+
+---
+
+# Third end-to-end run: the items not yet run — 2026-10-20
+
+Fresh stack (`scripts/init_env.sh`, mocks, n8n 2.43.2 queue mode, `SHIPMATCH_ENABLED=true`,
+`APPROVAL_TIMEOUT_MINUTES=1`). `dev/e2e_scenarios.py` gained four scenarios (`cleaning`, `naive_date`,
+`retry_n8n_down`, `purge`). The full suite (16) ran: 14 passed, `purge` and `metrics` failed on test-only
+interference (see Notes); after that fix the five affected scenarios were re-run and pass.
+
+| Commit | Change |
+|---|---|
+| Run the untested review items end to end; fix the template's Parse result | #6, #10, #11, #12, #13, #20; bug F |
+
+| Item | How it was run | Result |
+|---|---|---|
+| #11 cleaning | `cleaning`: intake of a quote laid out as `From: Lahore` / `To: Karachi` / `Weight` / `Pieces` / `Pickup date`, and of a real Outlook reply (`From: Name <addr>` / `Sent:` / `To:` / `Subject:`), then WF2 and Approve | PASS: lane kept in `body_clean`; triage `quote_request`, origin Lahore / destination Karachi extracted, missing only `pickup_date` (the mock extractor doesn't read dates); draft doesn't ask for the lane; the Outlook reply is cut to its first line |
+| #12 naive Date | `naive_date`: intake with `-0000`, no zone, naive ISO and `+0500` | PASS: all four intake 200 and saved as 10:15 UTC; each runs to an approval card and is sent on Approve; no Failure |
+| #13 Retry, n8n down | `retry_n8n_down`: email failed by an Anthropic draft 500, `docker compose stop n8n`, dashboard Retry, `start n8n`, Retry again | PASS: flash "Retry failed: n8n unreachable: …", email still `failed`, Failure open, Retry still offered and listed on Failures; after the restart Retry → card, Failure resolved, Approve sends once |
+| #20 purge | `purge`: four emails backdated 100 days (one done, one rejected, two awaiting approval), `manage.py purge_old_bodies` | PASS: only the done and rejected ones blanked (body, draft, approval; status and actions kept); a second purge finds nothing; the old open email's Slack Approve sends its real draft; a draft blanked anyway (set by SQL) → `/approval` 409 "reply text was deleted…", WF3 error, Failure, nothing sent |
+| #6 template | Imported the template unchanged (imports). Ran a harness built from it: Gmail trigger and Claude replaced by Code nodes with fixed data, the two Slack nodes by HTTP requests to the mock Slack with the template's own message expressions | PASS after bug F: real line breaks in both messages (8 and 3), no literal `
+`. The pre-fix file (`eeedddb`) sends literal `
+`. Real Gmail, Claude and Slack *send and wait* not run (needs real credentials) |
+| #10 backup retention | `scripts/backup.sh "<dir>/back ups"` with 16 stamp dirs, a `manual copy` dir, a file, and sibling dirs `back/` and `ups/` holding stamp dirs | PASS: dumps written; 14 newest stamp dirs kept (3 oldest removed); `manual copy`, the file and the sibling dirs untouched |
+
+## Bugs found and fixed
+
+- **F. The template failed on every email.** *Parse result* runs once for each item but returned an array;
+  n8n 2.43.2 stops with "A 'json' property isn't an object [item 0]", so no Slack message was ever sent. It
+  now returns one object. (Present since the template was added; found only by running it.)
+- **E again.** The main checkout still had CRLF in the `.sh` files (postgres created no databases); re-checking
+  them out fixed it, as before.
+
+## Notes
+
+- The new scenarios approve their emails at the end, so none times out into review while `metrics` runs (the
+  first full run failed `purge` and `metrics` on that and on a closed email left by an earlier run; test-only).
+- `purge` backdates emails, so the digest's "Average time to reply" is large after it runs.
+- An email whose draft was purged lands in `failed`; Retry fails the same way, so the reviewer has to Re-draft.
+- From Git Bash on Windows, `scripts/import_workflows.sh` needs `MSYS_NO_PATHCONV=1` (otherwise `/workflows/...`
+  becomes `C:/Program Files/Git/workflows/...`).
+
