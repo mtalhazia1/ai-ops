@@ -5,6 +5,7 @@ Slack click or a retried n8n execution can't move an email backwards or send twi
 """
 
 from django.db import transaction
+from django.utils import timezone
 
 from .models import Email, Status
 
@@ -44,6 +45,9 @@ def transition(email: Email, target: str, *, reason: str | None = None) -> Email
         if target == Status.NEEDS_REVIEW or target == Status.FAILED:
             locked.needs_review_reason = reason or locked.needs_review_reason
             update_fields.append("needs_review_reason")
+        if target == Status.NEEDS_REVIEW and locked.needed_review_at is None:
+            locked.needed_review_at = timezone.now()
+            update_fields.append("needed_review_at")
         locked.save(update_fields=update_fields)
     email.refresh_from_db()
     return email

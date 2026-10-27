@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux containers (postgres-init.sh) and Git Bash; CRLF breaks the shebang.
+*.sh text eol=lf

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hmac
 import re
-from datetime import datetime, timedelta
-from email.utils import parseaddr, parsedate_to_datetime
+from datetime import datetime
+from datetime import timezone as dt_timezone
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from typing import Any, Optional
 
 from django.conf import settings
@@ -18,9 +19,10 @@ from pydantic import ConfigDict, Field
 
 from . import mail, metrics, process, services, state
 from .cleaning import clean_body
+from .llm.client import LLMUnavailable
 from .llm.draft import reply_subject
 from .llm.triage import EmailInput, triage
-from .models import Action, Approval, Draft, Email, Failure, Status, Triage
+from .models import Action, Approval, Draft, Email, EmailExecution, Failure, Status, Triage
 from .services import release_pending_claims
 
 
@@ -39,13 +41,24 @@ _EMAIL_PATH = re.compile(r"/internal/emails/(\d+)(/|$)")
 
 
 def _note_execution(request) -> None:
-    """Remember which n8n execution last worked on an email (header X-N8N-Execution-Id).
-    Saved straight away, outside any transaction, so it survives a failing request."""
+    """Remember which n8n executions worked on an email (header X-N8N-Execution-Id): the
+    last one on the email, and every one in EmailExecution. Saved straight away, outside any
+    transaction, so it survives a failing request."""
     execution_id = (request.headers.get("X-N8N-Execution-Id") or "").strip()[:100]
     match = _EMAIL_PATH.search(request.path)
     if execution_id and match:
-        Email.objects.filter(pk=int(match.group(1))).exclude(last_execution_id=execution_id).update(
-            last_execution_id=execution_id)
+        email_id = int(match.group(1))
+        # Only when the last execution changes (one write per run, not per call). The update
+        # also proves the email exists before the row that points at it is inserted.
+        if Email.objects.filter(pk=email_id).exclude(last_execution_id=execution_id).update(
+                last_execution_id=execution_id):
+            _record_execution(email_id, execution_id)
+
+
+def _record_execution(email_id: int, execution_id: str) -> None:
+    if execution_id:
+        EmailExecution.objects.bulk_create([EmailExecution(email_id=email_id, execution_id=execution_id)],
+                                           ignore_conflicts=True)
 
 
 api = NinjaAPI(title="AI Ops Inbox internal API", auth=InternalToken(), urls_namespace="internal", docs_url=None)
@@ -56,6 +69,11 @@ def invalid_transition(request, exc: state.InvalidTransition):
     return api.create_response(
         request, {"detail": str(exc), "current": exc.current, "target": exc.target}, status=409
     )
+
+
+@api.exception_handler(mail.PurgedBody)
+def purged_body(request, exc: mail.PurgedBody):
+    return api.create_response(request, {"detail": str(exc)}, status=409)
 
 
 # --- Health -------------------------------------------------------------------------
@@ -103,8 +121,32 @@ def _parse_date(value: Optional[str]) -> datetime:
         except (TypeError, ValueError):
             return timezone.now()
     if timezone.is_naive(parsed):
-        parsed = timezone.make_aware(parsed, timezone.utc)
+        # No zone (or "-0000", which parsedate_to_datetime returns naive): treat as UTC.
+        # django.utils.timezone.utc was removed in Django 5.0.
+        parsed = parsed.replace(tzinfo=dt_timezone.utc)
     return parsed
+
+
+_ADDRESS_RE = re.compile(r"^[^@\s<>()\[\],;:\"]+@[^@\s<>()\[\],;:\"]+\.[^@\s<>()\[\],;:\"]+$")
+_ADDRESS_MAX = 320  # Email.from_email / to_email / reply_to
+
+
+def _addresses(header: Optional[str]) -> list[tuple[str, str]]:
+    """(name, address) pairs with a usable address, in header order. getaddresses
+    copes with several addresses, unlike parseaddr, which gives ('', '') for them."""
+    if not header:
+        return []
+    try:
+        pairs = getaddresses([header])
+    except Exception:  # malformed header; treat as no address
+        return []
+    return [(name, addr) for name, addr in pairs
+            if addr and len(addr) <= _ADDRESS_MAX and _ADDRESS_RE.match(addr)]
+
+
+def _first_address(header: Optional[str]) -> tuple[str, str]:
+    found = _addresses(header)
+    return found[0] if found else ("", "")
 
 
 @api.post("/emails")
@@ -114,17 +156,22 @@ def create_email(request, payload: EmailIn):
     if existing:
         return {"id": existing.id, "created": False, "status": existing.status}
 
-    from_name, from_email = parseaddr(payload.from_)
-    _, to_email = parseaddr(payload.to)
+    # An unparseable From is still saved (never lose an email), but with no address:
+    # triage then routes it to review and nothing can be sent or upserted to it.
+    from_name, from_email = _first_address(payload.from_)
+    if not from_email:
+        from_name = (parseaddr(payload.from_)[0] or payload.from_).strip()[:255]
+    _, to_email = _first_address(payload.to)
+    _, reply_to = _first_address(payload.reply_to)
     try:
         with transaction.atomic():
             email = Email.objects.create(
                 gmail_message_id=payload.gmail_message_id,
                 gmail_thread_id=payload.gmail_thread_id,
-                from_email=from_email or payload.from_,
-                from_name=from_name,
-                to_email=to_email or payload.to,
-                reply_to=parseaddr(payload.reply_to)[1] if payload.reply_to else "",
+                from_email=from_email,
+                from_name=from_name[:255],
+                to_email=to_email,
+                reply_to=reply_to,
                 rfc_message_id=payload.message_id.strip()[:998],
                 references=payload.references.strip(),
                 subject=payload.subject,
@@ -137,6 +184,7 @@ def create_email(request, payload: EmailIn):
     except IntegrityError:  # lost a race with a parallel execution
         email = Email.objects.get(gmail_message_id=payload.gmail_message_id)
         return {"id": email.id, "created": False, "status": email.status}
+    _record_execution(email.id, email.last_execution_id)
     return {"id": email.id, "created": True, "status": email.status}
 
 
@@ -175,16 +223,21 @@ def triage_email(request, email_id: int):
                              reason=saved.review_reason or None)
             return process.payload(email, saved, rerun=True)
 
-        result = triage(
-            EmailInput(
-                from_email=email.from_email,
-                from_name=email.from_name,
-                subject=email.subject,
-                body_clean=email.body_clean,
-                attachments=email.attachments,
-                received_at=email.received_at,
+        try:
+            result = triage(
+                EmailInput(
+                    from_email=email.from_email,
+                    from_name=email.from_name,
+                    subject=email.subject,
+                    body_clean=email.body_clean,
+                    attachments=email.attachments,
+                    received_at=email.received_at,
+                )
             )
-        )
+        except LLMUnavailable as exc:
+            # Anthropic outage: nothing saved, the email stays where it was. WF2 fails the
+            # run (WF4 records it, the email goes to failed) and Retry triages again.
+            return api.create_response(request, _llm_unavailable(email, exc), status=503)
         triage_row = Triage.objects.create(
             email=email,
             category=result.category,
@@ -213,6 +266,11 @@ def triage_email(request, email_id: int):
     return process.payload(email, triage_row)
 
 
+def _llm_unavailable(email: Email, exc: LLMUnavailable) -> dict[str, Any]:
+    return {"id": email.id, "status": email.status, "ok": False, "retry": True,
+            "detail": f"AI service unavailable, try again later ({exc})"[:500]}
+
+
 # --- Draft ------------------------------------------------------------------------
 
 def _draft_out(email: Email, draft: Draft, *, rerun: bool) -> dict[str, Any]:
@@ -222,6 +280,7 @@ def _draft_out(email: Email, draft: Draft, *, rerun: bool) -> dict[str, Any]:
         "status": email.status,
         "rerun": rerun,
         "ok": draft.ok,
+        "draft_id": draft.id,
         "subject": draft.subject,
         "body": draft.body,
         "asks_for": draft.asks_for,
@@ -243,20 +302,33 @@ def draft_email(request, email_id: int):
         existing = email.latest_draft
         if email.status in (Status.AWAITING_APPROVAL, Status.APPROVED, Status.DONE) and existing and existing.ok:
             return _draft_out(email, existing, rerun=True)
+        # A repeat after the draft was blocked (failed checks, or ShipMatch refused the
+        # paperwork) gives the same answer, so WF2's review branch runs again.
+        if email.status == Status.NEEDS_REVIEW and existing and not existing.ok:
+            return _draft_out(email, existing, rerun=True)
         # Only freshly triaged emails are drafted automatically. Anything in review
         # stays with the reviewer (the dashboard can re-draft).
         if email.status != Status.TRIAGED:
             raise state.InvalidTransition(email.status, Status.AWAITING_APPROVAL)
-        rejected = services.failed_uploads(email)
-        if rejected:
-            # Don't tell the sender "documents received" when ShipMatch refused them.
-            reason = "ShipMatch did not accept: " + "; ".join(rejected)
-            state.transition(email, Status.NEEDS_REVIEW, reason=reason[:1000])
-            return {"id": email.id, "status": email.status, "rerun": False, "ok": False, "problems": reason,
-                    "review_text": process.review_text(email, reason), "dashboard_url": process.dashboard_url(email)}
-        draft = services.create_draft(email)
+        try:
+            draft = services.create_draft(email)
+        except services.UploadsNotFinished as exc:
+            out = {"id": email.id, "status": email.status, "rerun": False, "ok": False, "problems": str(exc),
+                   "dashboard_url": process.dashboard_url(email)}
+            if exc.in_progress:
+                # Another WF2 run is still uploading; it drafts when it is done. WF2 stops quietly.
+                return {**out, "pending": True}
+            # The upload failed (429/5xx) or was abandoned: WF2 fails the run so WF4 records
+            # a failure and Retry repeats the upload.
+            return api.create_response(request, {**out, "retry": True, "detail": str(exc)}, status=503)
+        except LLMUnavailable as exc:
+            # Anthropic outage: no draft saved, still triaged. Like a transient upload error,
+            # WF2 fails the run and Retry drafts again (reusing the saved triage).
+            return api.create_response(request, _llm_unavailable(email, exc), status=503)
         if draft.ok:
             state.transition(email, Status.AWAITING_APPROVAL)
+        elif draft.blocked_reason.startswith(services.UPLOAD_REFUSED_PREFIX):
+            state.transition(email, Status.NEEDS_REVIEW, reason=draft.blocked_reason)
         else:
             state.transition(email, Status.NEEDS_REVIEW, reason=f"draft blocked: {draft.blocked_reason}"[:1000])
     return _draft_out(email, draft, rerun=False)
@@ -269,6 +341,13 @@ class ApprovalIn(Schema):
     reviewer: str = ""
     channel: str = "slack"
     final_body: Optional[str] = None
+    # The draft the approver was shown (WF2 puts it on the Slack approval card). When it is
+    # no longer the latest draft, the approval is refused instead of sending text nobody saw.
+    draft_id: Optional[int] = None
+
+
+STALE_DRAFT_REASON = ("Slack approval was for an older draft: the draft was re-done after the approval card "
+                      "was posted. Check the new draft in the dashboard.")
 
 
 def _approval_out(email: Email, approval: Approval, *, rerun: bool) -> dict[str, Any]:
@@ -292,11 +371,16 @@ def _approval_out(email: Email, approval: Approval, *, rerun: bool) -> dict[str,
 @api.post("/emails/{email_id}/approval")
 def record_approval(request, email_id: int, payload: ApprovalIn):
     """Record a human decision. Repeating the same decision returns it again
-    (`rerun: true`) so WF3 can finish after a crash; anything else is 409."""
+    (`rerun: true`) so WF3 can finish after a crash; anything else is 409.
+
+    An approval that names a `draft_id` (Slack) is only accepted while that draft is still
+    the latest one; otherwise 409 `stale_draft` and the email goes to review."""
     if payload.decision not in ("approved", "edited", "rejected"):
         return api.create_response(request, {"detail": "decision must be approved, edited or rejected"}, status=422)
     if payload.channel not in ("slack", "dashboard"):
         return api.create_response(request, {"detail": "channel must be slack or dashboard"}, status=422)
+    if payload.decision != "rejected" and not mail.reply_recipient(get_object_or_404(Email, pk=email_id)):
+        return api.create_response(request, {"detail": "no valid sender address to reply to"}, status=422)
     get_object_or_404(Email, pk=email_id)
     with transaction.atomic():
         email = Email.objects.select_for_update().get(pk=email_id)
@@ -306,6 +390,13 @@ def record_approval(request, email_id: int, payload: ApprovalIn):
             decision, body = payload.decision, ""
             if not rejecting:
                 draft = email.latest_draft
+                if payload.draft_id is not None and (draft is None or draft.id != payload.draft_id):
+                    if email.status == Status.AWAITING_APPROVAL:
+                        state.transition(email, Status.NEEDS_REVIEW, reason=STALE_DRAFT_REASON)
+                    return api.create_response(request, {
+                        "detail": STALE_DRAFT_REASON, "stale_draft": True, "current": email.status,
+                        "approved_draft_id": payload.draft_id, "latest_draft_id": draft.id if draft else None,
+                    }, status=409)
                 draft_body = draft.body if draft and draft.ok else ""
                 body = (payload.final_body or "").strip() or draft_body
                 if not body:
@@ -388,7 +479,7 @@ class ClaimIn(Schema):
     idempotency_key: str
 
 
-CLAIM_TTL = timedelta(minutes=10)
+CLAIM_TTL = services.CLAIM_TTL
 
 
 @api.post("/emails/{email_id}/actions/claim")
@@ -399,6 +490,10 @@ def claim_action(request, email_id: int, payload: ClaimIn):
     done=true: it already succeeded; `response` holds the saved result.
     Both false: another run holds a fresh claim; skip.
     A failed attempt, or a claim older than 10 minutes (a crashed run), can be re-claimed.
+
+    Except `reply_sent`: a claim that never logged its result (crashed run, recorded
+    failure) may stand for a reply Gmail already sent, so it is never re-claimed. The email
+    goes to `failed` with that reason (`uncertain: true`) and a human decides in the dashboard.
     """
     email = get_object_or_404(Email, pk=email_id)
     if payload.kind not in {k for k, _ in Action.KINDS}:
@@ -419,9 +514,19 @@ def claim_action(request, email_id: int, payload: ClaimIn):
         claimed_at = action.response.get("claimed_at") if action.response.get("pending") else None
         if claimed_at and now - datetime.fromisoformat(claimed_at) < CLAIM_TTL:
             return {"proceed": False, "done": False, "response": {}}
+        if action.kind == "reply_sent" and services.reply_unresolved(action):
+            action.response = {"uncertain": True, "claimed_at": action.response.get("claimed_at")}
+            action.save(update_fields=["response"])
+            _fail_reply_uncertain(action.email)
+            return {"proceed": False, "done": False, "uncertain": True, "response": {}}
         action.response, action.ok = pending, False
         action.save(update_fields=["response", "ok"])
     return {"proceed": True, "done": False, "response": {}}
+
+
+def _fail_reply_uncertain(email: Email) -> None:
+    if state.can_transition(Email.objects.get(pk=email.pk).status, Status.FAILED):
+        state.transition(email, Status.FAILED, reason=services.REPLY_UNCERTAIN_REASON)
 
 
 @api.post("/emails/{email_id}/actions")
@@ -463,13 +568,15 @@ class FailureIn(Schema):
 @api.post("/failures")
 def record_failure(request, payload: FailureIn):
     """WF4: one row per failed execution. The email is the one named in the payload, or
-    else the one this execution last worked on."""
+    else the one this execution worked on: any call it made counts, not only the latest
+    call to that email, so a resumed run that fails before calling Django again is still
+    found after another run touched the email."""
     email = None
     if payload.email_id:
         email = Email.objects.filter(pk=payload.email_id).first()
     elif payload.execution_id:
         # One WF1 run can take in several emails; only attach when the match is unambiguous.
-        matches = list(Email.objects.filter(last_execution_id=payload.execution_id)[:2])
+        matches = list(Email.objects.filter(executions__execution_id=payload.execution_id[:100]).distinct()[:2])
         email = matches[0] if len(matches) == 1 else None
     failure = Failure.objects.create(
         email=email,
@@ -481,7 +588,10 @@ def record_failure(request, payload: FailureIn):
     if email:
         release_pending_claims(email)
     if email and state.can_transition(email.status, Status.FAILED):
-        state.transition(email, Status.FAILED, reason=f"{payload.workflow} failed at {payload.node}: {payload.error}"[:1000])
+        reason = f"{payload.workflow} failed at {payload.node}: {payload.error}"
+        if services.reply_may_have_been_sent(email):
+            reason = f"{services.REPLY_UNCERTAIN_REASON} ({reason})"
+        state.transition(email, Status.FAILED, reason=reason[:1000])
     link = process.dashboard_url(email) if email else f"{settings.DASHBOARD_BASE_URL.rstrip('/')}/failures/"
     alert = (f":warning: *{process.slack_escape(payload.workflow or 'Workflow')}* failed at "
              f"*{process.slack_escape(payload.node or '?')}*: {process.slack_escape(payload.error[:300])}\n"

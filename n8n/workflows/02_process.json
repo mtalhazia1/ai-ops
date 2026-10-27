@@ -109,7 +109,12 @@
         "method": "POST",
         "url": "={{ $env.APP_URL }}/internal/emails/{{ $json.email_id }}/triage",
         "options": {
-          "timeout": 120000
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
         },
         "sendHeaders": true,
         "headerParameters": {
@@ -1435,7 +1440,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3080,
+        3300,
         760
       ],
       "retryOnFail": true,
@@ -1757,7 +1762,7 @@
           "conditions": [
             {
               "id": "369b0dd1-caea-5af5-a171-33d0a4c9749a",
-              "leftValue": "={{ $json.ok === false }}",
+              "leftValue": "={{ $json.ok === false && $json.pending !== true && $json.retry !== true }}",
               "operator": {
                 "type": "boolean",
                 "operation": "true",
@@ -1799,7 +1804,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval' }) }}"
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval:' + $('Draft (Django)').item.json.draft_id }) }}"
       },
       "id": "fd4f6b94-0892-5afb-9268-8da4a4fbe364",
       "name": "Claim approval message",
@@ -1943,7 +1948,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval', request: {}, response: { channel: $json.channel, ts: $json.ts }, ok: true }) }}"
+        "jsonBody": "={{ JSON.stringify({ kind: 'slack_alert', idempotency_key: 'slack_alert:' + $('Triage (Django)').item.json.id + ':approval:' + $('Draft (Django)').item.json.draft_id, request: {}, response: { channel: $json.channel, ts: $json.ts }, ok: true }) }}"
       },
       "id": "e19fdfb0-899d-585b-8637-100e91931c45",
       "name": "Log approval message",
@@ -2062,7 +2067,8 @@
             "decision": "approved",
             "reviewer": "slack",
             "channel": "slack",
-            "final_body": ""
+            "final_body": "",
+            "draft_id": "={{ String($('Draft (Django)').item.json.draft_id) }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -2105,6 +2111,15 @@
             {
               "id": "final_body",
               "displayName": "final_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "draft_id",
+              "displayName": "draft_id",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -2282,6 +2297,364 @@
         6420,
         560
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8451808f-0551-5c48-813c-53c0b4eb147f",
+              "leftValue": "={{ [200, 201, 400, 402].includes($json.statusCode) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "611a109c-df97-50df-b8fc-30569f34203b",
+      "name": "Upload answered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3080,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=ShipMatch upload failed (HTTP {{ $json.statusCode }}) for {{ $('One item per attachment').item.json.filename }}; Retry repeats it"
+      },
+      "id": "2eadb7a5-bc0a-5d05-8204-ed181f6acfa6",
+      "name": "ShipMatch upload failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        3300,
+        900
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f51509bb-4532-5871-8b95-62e790a77466",
+      "name": "Uploads finished",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        3520,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a57752ec-71cf-54a5-9f09-52da4961fba4",
+              "leftValue": "={{ $json.ok === false && $json.pending === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e4d41b68-2e72-5b37-bf5e-c081d62645d4",
+      "name": "Draft pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4880,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ $json.retry === true ? 'Draft not ready: ' + $json.detail : 'Unexpected answer from /draft: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+      },
+      "id": "32489683-4f3f-59b4-810f-b66479d97bfb",
+      "name": "Draft failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        5320,
+        840
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "6d7e64ca-1fb7-595a-922e-290d759961c8",
+      "name": "Another run drafts",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        5100,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4e288bdf-4d3f-5180-bbad-2a1c1812dbe1",
+              "leftValue": "={{ $json.status === 'needs_review' || $json.current === 'needs_review' }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4bd7144e-df7f-5fa3-8fdc-270431eaa599",
+      "name": "Paperwork in review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        940
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Could not move the paperwork email to review: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+      },
+      "id": "d6611186-60ae-5f88-b7b0-9835f9c48165",
+      "name": "Paperwork to review failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "00e608ae-63e6-58ac-8b6c-a5220cdd4e82",
+              "leftValue": "={{ typeof $json.current === 'string' && $json.current !== '' }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3948d94f-2689-53f7-9577-e17f399a3b51",
+      "name": "Decided meanwhile?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6640,
+        720
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f1b8b284-d2a4-5f20-8e03-0b9fcf0a404c",
+      "name": "Already decided",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        6860,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Could not move the email to review after the approval timeout: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+      },
+      "id": "6e69860c-274a-53d9-a6a9-e6f99931f868",
+      "name": "Approval timeout failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        6860,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bcd22471-c82f-5aa8-9555-316c4406015d",
+              "leftValue": "={{ typeof $json.category === 'string' && $json.current === undefined }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7945d23d-0e8e-5cf1-9f8f-d5d6b8fdb7f8",
+      "name": "Triaged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a5b9b857-44e4-539d-bf30-0833ffac58ef",
+              "leftValue": "={{ ['awaiting_approval', 'approved', 'done', 'rejected', 'ignored'].includes($json.current) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2ed6ef5d-037f-552d-b941-14a5cf9fcb0a",
+      "name": "Already past WF2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        -260
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "20984792-3c6c-5428-bac0-f2de3e8d8de8",
+      "name": "Already processed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        -340
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ $json.retry === true ? 'Triage not possible now: ' + $json.detail : 'Unexpected answer from /triage: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+      },
+      "id": "597f16c6-68c9-5c93-b700-341a6a77717e",
+      "name": "Triage failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1e8b265f-f402-58c3-b330-c4755f5ce014",
+              "leftValue": "={{ $json.retry !== true && ['needs_review', 'rejected', 'ignored'].includes($json.current) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3c0f658a-e77c-5c36-83c2-65e64dd27b19",
+      "name": "In review meanwhile?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5100,
+        760
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "eedf0c10-7a0a-5f62-8501-b449e2d2b586",
+      "name": "Left to the reviewer",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        5320,
+        680
+      ]
     }
   ],
   "connections": {
@@ -2333,7 +2706,7 @@
       "main": [
         [
           {
-            "node": "Needs review?",
+            "node": "Triaged?",
             "type": "main",
             "index": 0
           }
@@ -2725,7 +3098,7 @@
       "main": [
         [
           {
-            "node": "Review text",
+            "node": "Paperwork in review?",
             "type": "main",
             "index": 0
           }
@@ -2765,7 +3138,7 @@
         ],
         [
           {
-            "node": "Ready for draft",
+            "node": "Uploads finished",
             "type": "main",
             "index": 0
           }
@@ -2809,7 +3182,7 @@
       "main": [
         [
           {
-            "node": "Log upload",
+            "node": "Upload answered?",
             "type": "main",
             "index": 0
           }
@@ -2922,9 +3295,9 @@
       "main": [
         [
           {
-            "node": "Ready for draft",
+            "node": "Uploads finished",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -2985,6 +3358,13 @@
         [
           {
             "node": "Review text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Draft pending?",
             "type": "main",
             "index": 0
           }
@@ -3105,6 +3485,150 @@
         [
           {
             "node": "Review text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decided meanwhile?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload answered?": {
+      "main": [
+        [
+          {
+            "node": "Log upload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ShipMatch upload failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uploads finished": {
+      "main": [
+        [
+          {
+            "node": "Ready for draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft pending?": {
+      "main": [
+        [
+          {
+            "node": "Another run drafts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "In review meanwhile?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Paperwork in review?": {
+      "main": [
+        [
+          {
+            "node": "Review text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Paperwork to review failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decided meanwhile?": {
+      "main": [
+        [
+          {
+            "node": "Already decided",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Approval timeout failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Triaged?": {
+      "main": [
+        [
+          {
+            "node": "Needs review?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already past WF2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already past WF2?": {
+      "main": [
+        [
+          {
+            "node": "Already processed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Triage failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "In review meanwhile?": {
+      "main": [
+        [
+          {
+            "node": "Left to the reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Draft failed",
             "type": "main",
             "index": 0
           }

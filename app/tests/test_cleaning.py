@@ -38,3 +38,23 @@ def test_forwarded_content_kept():
 
 def test_inline_quote_lines_dropped():
     assert clean_body("> old line\nNew answer") == "New answer"
+
+
+def test_quote_request_with_from_to_lines_is_not_cut():
+    body = "Hi,\nPlease quote:\nFrom: Lahore\nTo: Karachi\nWeight: 2 tons\nPickup date: 20 Oct"
+    assert clean_body(body) == body
+
+
+def test_quote_request_with_from_to_date_lines_is_not_cut():
+    body = "Hi,\nPlease quote:\nFrom: Lahore\nTo: Karachi\nDate: 20 Oct\nWeight: 2 tons"
+    assert clean_body(body) == body
+
+
+def test_outlook_header_block_without_email_removed():
+    body = "Fine by us.\n\nFrom: Indus Freight Ops\nSent: Tuesday, October 6, 2026 2:00 PM\nTo: Faisal\nSubject: Your quote Q-1150\n\nOld text"
+    assert clean_body(body) == "Fine by us."
+
+
+def test_quoted_header_with_email_and_date_removed():
+    body = "Noted.\n\nFrom: Ali Raza <ali@x.example>\nDate: Mon, Oct 5, 2026\nTo: ops@indusfreight.example\n\nOld text"
+    assert clean_body(body) == "Noted."

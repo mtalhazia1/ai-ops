@@ -17,9 +17,10 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from . import metrics, services, state
+from . import mail, metrics, services, state
 from .forms import DecisionForm, PlaybookForm, TriageEditForm
 from .llm import guard, schemas
+from .llm.client import LLMUnavailable
 from .models import Category, Email, EvalRun, Failure, Playbook, Status, Triage
 
 REVIEW_STATUSES = [Status.NEEDS_REVIEW, Status.AWAITING_APPROVAL, Status.FAILED]
@@ -99,6 +100,7 @@ def email_detail(request, pk):
         "can_decide": email.status in DECIDABLE,
         "can_edit": email.status in DECIDABLE | {Status.FAILED},
         "can_redraft": email.status in DECIDABLE and triage_row is not None,
+        "reply_uncertain": email.status == Status.FAILED and services.reply_may_have_been_sent(email),
         "timeline": _timeline(email),
     })
 
@@ -134,6 +136,10 @@ def decide(request, pk):
     if action == "approve":
         if not body:
             messages.error(request, "Write the reply before approving.")
+            return redirect("inbox:email_detail", pk=pk)
+        if not mail.reply_recipient(email):
+            messages.error(request, "No valid sender address was found in this email, so a reply can't be sent. "
+                                    "Reply from Gmail directly, or reject / ignore it here.")
             return redirect("inbox:email_detail", pk=pk)
         problems = guard.check_reply(body, allowed_sources=[email.subject, email.body_text, email.from_email,
                                                            services.PlaybookData.from_model(Playbook.get()).text()])
@@ -191,9 +197,19 @@ def redraft(request, pk):
     if email.latest_triage.category == Category.OTHER:
         messages.error(request, "Set a category first; there is no reply template for “other”.")
         return redirect("inbox:email_detail", pk=pk)
-    draft = services.create_draft(email)
+    try:
+        draft = services.create_draft(email)
+    except services.UploadsNotFinished as exc:
+        messages.error(request, f"Not re-drafted: {exc}. Try again once the upload is done.")
+        return redirect("inbox:email_detail", pk=pk)
+    except LLMUnavailable as exc:
+        messages.error(request, f"Not re-drafted: the AI service is unavailable right now ({exc}). "
+                                "The current draft is unchanged; try again in a few minutes.")
+        return redirect("inbox:email_detail", pk=pk)
     if draft.ok:
         messages.success(request, "New draft ready below.")
+    elif draft.blocked_reason.startswith(services.UPLOAD_REFUSED_PREFIX):
+        messages.error(request, f"No AI draft: {draft.blocked_reason}. Write the reply yourself.")
     else:
         messages.error(request, f"The new draft fails the checks ({draft.blocked_reason}). Edit it before sending.")
     return redirect("inbox:email_detail", pk=pk)
@@ -217,12 +233,39 @@ def retry_email(request, pk):
         return redirect(request.POST.get("next") or "inbox:failures")
     try:
         mode = services.retry(email)
+    except services.ReplyMaybeSent:
+        messages.error(request, f"Not retried: the {services.REPLY_UNCERTAIN_REASON}. "
+                                "Open the email and choose “Mark as sent” or “Send again anyway”.")
+        return redirect("inbox:email_detail", pk=pk)
     except (services.N8nError, state.InvalidTransition) as exc:
         messages.error(request, f"Retry failed: {exc}")
     else:
         messages.success(request, f"Retrying email #{email.id}: " + (
             "resuming at sending the approved reply." if mode == "send" else "running the process workflow again."))
     return redirect(request.POST.get("next") or "inbox:failures")
+
+
+@login_required
+@require_POST
+def resolve_reply(request, pk):
+    """A send whose result was never logged: the reviewer checked the Gmail thread and
+    either confirms the reply is there ("sent") or asks for one more send ("resend")."""
+    email = get_object_or_404(Email, pk=pk)
+    user = request.user.get_username()
+    try:
+        if request.POST.get("action") == "sent":
+            services.mark_reply_sent(email, user=user)
+            messages.success(request, "Marked as sent. No reply was sent now.")
+        elif request.POST.get("action") == "resend":
+            services.send_again(email, user=user)
+            messages.success(request, "Sending the approved reply again.")
+        else:
+            raise Http404
+    except state.InvalidTransition:
+        messages.error(request, "Nothing to resolve: this email has no unconfirmed send.")
+    except services.N8nError as exc:
+        messages.error(request, f"Could not reach n8n: {exc}. Use Retry once n8n is back.")
+    return redirect("inbox:email_detail", pk=pk)
 
 
 @login_required

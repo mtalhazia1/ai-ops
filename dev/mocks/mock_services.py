@@ -3,6 +3,26 @@ Anthropic Messages API, so the n8n workflows can be run end to end without accou
 
 Development only. Run by docker-compose.mocks.yml; inspect with GET /_state, clear with
 POST /_reset. The "LLM" here is a few regexes: it exercises the plumbing, not accuracy.
+
+Failure controls (default behaviour is unchanged when none are set):
+
+- Filename markers on ShipMatch uploads: a filename containing `refuse400` gets 400
+  (file rejected), `paused402` gets 402 (uploads paused). Permanent, like ShipMatch's.
+- POST /_control with a JSON body sets rules that make matching requests fail or wait:
+    {"add": [{"target": "upload", "match": "flaky.pdf", "status": 503}]}
+    {"add": [{"target": "gmail_send", "status": 503, "times": 1}]}
+    {"add": [{"target": "anthropic", "kind": "draft", "match": "boom", "status": 500}]}
+    {"add": [{"target": "anthropic", "kind": "draft", "match": "boom", "malformed": true}]}
+    {"add": [{"target": "upload", "match": "slow", "delay": 8}]}      # wait, then answer normally
+    {"clear": true}   /   {"clear": "<rule id>"}
+  target: upload | anthropic | gmail_send | gmail_attachment | slack | hubspot | shipmatch_search.
+  match: substring of the request (multipart body for uploads, the prompt for anthropic,
+  the decoded RFC 822 message for gmail_send); omitted = every request to the target.
+  kind (anthropic only): classify | extract | draft. times: fail only that many requests.
+  status: the HTTP status to answer (body: optional JSON body); no status = only `delay`.
+  malformed (anthropic): 200 with a message that has no `usage` block.
+  GET /_control lists the rules; every rule that fired is logged in /_state "faults".
+  /_reset clears the rules too.
 """
 
 import base64
@@ -11,12 +31,28 @@ import itertools
 import json
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 LOCK = threading.Lock()
 IDS = itertools.count(1001)
 STATE: dict = {}
+RULES: list = []
+
+TARGETS = {
+    "upload": ("POST", r"^/shipmatch/api/[^/]+/documents$"),
+    "shipmatch_search": ("GET", r"^/shipmatch/api/[^/]+/shipments$"),
+    "anthropic": ("POST", r"^/anthropic/v1/messages$"),
+    "gmail_send": ("POST", r"^/gmail/gmail/v1/users/me/messages/send$"),
+    "gmail_attachment": ("GET", r"^/gmail/gmail/v1/users/me/messages/[^/]+/attachments/[^/]+$"),
+    "slack": ("POST", r"^/slack/api/chat\.postMessage$"),
+    "hubspot": ("POST", r"^/hubspot/"),
+}
+UPLOAD_MARKERS = {
+    "refuse400": (400, {"detail": "file type not accepted (mock refuse400)"}),
+    "paused402": (402, {"detail": "uploads are paused on this plan (mock paused402)"}),
+}
 
 SHIPMENTS = [
     {"id": 501, "reference": "SH-1022", "status": "ready", "containers": ["MSCU1234566"], "pos": ["7781"]},
@@ -29,10 +65,52 @@ def reset():
     with LOCK:
         STATE.clear()
         STATE.update({"contacts": {}, "deals": [], "notes": [], "tasks": [], "slack": [], "documents": [],
-                      "lookups": [], "sent": [], "labels": {}, "llm_calls": 0, "unauthorized": 0})
+                      "lookups": [], "sent": [], "labels": {}, "llm_calls": 0, "unauthorized": 0,
+                      "uploads": [], "draft_calls": 0, "faults": []})
+        RULES.clear()
 
 
 reset()
+
+
+def control(data):
+    """POST /_control: add or clear failure rules (see the module docstring)."""
+    with LOCK:
+        if data.get("clear") is True:
+            RULES.clear()
+        elif data.get("clear"):
+            RULES[:] = [r for r in RULES if r["id"] != data["clear"]]
+        for rule in data.get("add", []):
+            if rule.get("target") not in TARGETS:
+                raise ValueError(f"unknown target {rule.get('target')!r}")
+            RULES.append({"id": rule.get("id") or f"rule_{next(IDS)}", **rule})
+        return list(RULES)
+
+
+def fault(method, path, haystack, kind=None):
+    """The first rule matching this request (its `times` used up by one), or None."""
+    with LOCK:
+        for rule in RULES:
+            want_method, pattern = TARGETS[rule["target"]]
+            if method != want_method or not re.search(pattern, path):
+                continue
+            if rule.get("kind") and rule["kind"] != kind:
+                continue
+            if rule.get("match") and rule["match"] not in haystack:
+                continue
+            if "times" in rule:
+                rule["times"] -= 1
+                if rule["times"] <= 0:
+                    RULES.remove(rule)
+            STATE["faults"].append({"rule": rule["id"], "target": rule["target"], "path": path,
+                                    "status": rule.get("status"), "at": time.time()})
+            return rule
+    return None
+
+
+def llm_kind(body):
+    props = body.get("output_config", {}).get("format", {}).get("schema", {}).get("properties", {})
+    return "draft" if "body" in props else "classify" if "category" in props else "extract"
 
 
 # --- Rule-based "LLM" -----------------------------------------------------------------
@@ -97,6 +175,8 @@ def extract(text, fields):
 def llm(body):
     with LOCK:
         STATE["llm_calls"] += 1
+        if llm_kind(body) == "draft":
+            STATE["draft_calls"] += 1
     text = body["messages"][0]["content"]
     schema = body.get("output_config", {}).get("format", {}).get("schema", {})
     if "body" in schema.get("properties", {}):
@@ -152,15 +232,36 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _fault(self, path, haystack, kind=None):
+        """Answer per a matching /_control rule. True when the response was sent."""
+        rule = fault(self.command, path, haystack, kind)
+        if rule is None:
+            return False
+        if rule.get("delay"):
+            time.sleep(float(rule["delay"]))
+        if rule.get("malformed"):
+            self._send(200, {"id": f"msg_mock_{next(IDS)}", "type": "message", "role": "assistant",
+                             "content": [{"type": "text", "text": "{}"}], "stop_reason": "end_turn"})
+            return True
+        if not rule.get("status"):
+            return False  # delay only: carry on normally
+        self._send(int(rule["status"]), rule.get("body") or {"error": f"mock fault {rule['id']}"})
+        return True
+
     def do_GET(self):
         url = urlparse(self.path)
         path, query = url.path, parse_qs(url.query)
         if path == "/_state":
             with LOCK:
                 return self._send(200, STATE)
+        if path == "/_control":
+            with LOCK:
+                return self._send(200, {"rules": RULES})
         if path == "/health":
             return self._send(200, {"ok": True})
         if not self._auth():
+            return
+        if self._fault(path, self.path):
             return
         if m := re.match(r"^/gmail/gmail/v1/users/me/messages/[^/]+/attachments/([^/]+)$", path):
             data = base64.urlsafe_b64encode(FAKE_PDF + m.group(1).encode()).decode()
@@ -179,9 +280,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/_reset":
             reset()
             return self._send(200, {"ok": True})
+        if path == "/_control":
+            try:
+                return self._send(200, {"rules": control(json.loads(raw or b"{}"))})
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
         if path == "/anthropic/v1/messages":
-            return self._send(200, llm(json.loads(raw)))
+            body = json.loads(raw)
+            if self._fault(path, body["messages"][0]["content"], llm_kind(body)):
+                return
+            return self._send(200, llm(body))
         if not self._auth():
+            return
+        haystack = raw.decode("latin-1")
+        if path == "/gmail/gmail/v1/users/me/messages/send":
+            data = json.loads(raw)
+            haystack = base64.urlsafe_b64decode(data["raw"] + "=" * (-len(data["raw"]) % 4)).decode("utf-8", "replace")
+        if self._fault(path, haystack):
             return
         if path == "/hubspot/crm/v3/objects/contacts/batch/upsert":
             results = []
@@ -232,6 +347,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"detail": "file is required"})
             fname = re.search(rb'filename="([^"]*)"', raw)
             name = fname.group(1).decode() if fname else "upload"
+            with LOCK:
+                STATE["uploads"].append({"filename": name, "at": time.time()})
+            for marker, (status, answer) in UPLOAD_MARKERS.items():
+                if marker in name:
+                    return self._send(status, answer)
             with LOCK:
                 existing = next((d for d in STATE["documents"] if d["size"] == len(raw) and d["filename"] == name), None)
                 if existing:

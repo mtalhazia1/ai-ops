@@ -15,6 +15,9 @@ _REPLY_HEADER_PATTERNS = [
     re.compile(r"^\s*_{10,}\s*$"),  # Outlook separator line
     re.compile(r"^\s*From:\s.+$", re.IGNORECASE),  # Outlook header block ("From: ... Sent: ...")
 ]
+# Header lines that follow "From:" in an Outlook quoted-reply block.
+_QUOTE_HEADER_LINE = re.compile(r"^\s*(Sent|Date|To|Cc|Bcc|Subject|Importance):(\s|$)", re.IGNORECASE)
+_SENDER_ADDRESS = re.compile(r"[^\s<>@]+@[^\s<>@]+|<[^<>]*>")
 _FORWARD_MARKER = re.compile(r"^\s*-{2,}\s*Forwarded message\s*-{2,}\s*$|^\s*Begin forwarded message:\s*$", re.IGNORECASE)
 _SIGNATURE_PATTERNS = [
     re.compile(r"^--\s*$"),
@@ -37,10 +40,25 @@ def _is_reply_header(lines: list[str], i: int) -> bool:
     # "On Tue, ... <x@y>" followed by a "wrote:" line.
     if _REPLY_HEADER_PATTERNS[1].match(line) and i + 1 < len(lines) and lines[i + 1].strip().lower().endswith("wrote:"):
         return True
-    # Outlook style: "From: ..." followed within 4 lines by "Sent:" or "Date:".
+    # Outlook style: "From: ..." directly followed by a block of header lines
+    # ("Sent:", "To:", "Subject:" ...). A quote request laid out as
+    # "From: Lahore / To: Karachi / Weight: ... / Pickup date: ..." must not match,
+    # so the block has to contain "Sent:" or "Date:" at the start of a line, and
+    # either the "From:" value looks like a sender (email or <...>) or the block
+    # carries an Outlook-only header ("Sent:" or "Subject:").
     if _REPLY_HEADER_PATTERNS[4].match(line):
-        window = " ".join(lines[i + 1 : i + 5]).lower()
-        return "sent:" in window or "date:" in window
+        names: set[str] = set()
+        for following in lines[i + 1 : i + 8]:
+            if not following.strip():
+                continue  # HTML-converted Outlook headers can have blank lines between them
+            m = _QUOTE_HEADER_LINE.match(following)
+            if not m:
+                break
+            names.add(m.group(1).lower())
+        if not names & {"sent", "date"}:
+            return False
+        from_value = line.split(":", 1)[1]
+        return bool(_SENDER_ADDRESS.search(from_value)) or bool(names & {"sent", "subject"})
     return False
 
 

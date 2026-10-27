@@ -24,6 +24,10 @@
             {
               "name": "final_body",
               "type": "string"
+            },
+            {
+              "name": "draft_id",
+              "type": "string"
             }
           ]
         }
@@ -130,6 +134,12 @@
               "name": "final_body",
               "value": "={{ $json.final_body ?? $json.body.final_body ?? '' }}",
               "type": "string"
+            },
+            {
+              "id": "cb4e0aff-1be6-5ea1-811b-564d25faebd7",
+              "name": "draft_id",
+              "value": "={{ String($json.draft_id ?? ($json.body || {}).draft_id ?? '') }}",
+              "type": "string"
             }
           ]
         },
@@ -170,7 +180,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify(Object.assign({ decision: $json.decision, reviewer: $json.reviewer, channel: $json.channel }, $json.final_body ? { final_body: $json.final_body } : {})) }}"
+        "jsonBody": "={{ JSON.stringify(Object.assign({ decision: $json.decision, reviewer: $json.reviewer, channel: $json.channel }, $json.final_body ? { final_body: $json.final_body } : {}, $json.draft_id ? { draft_id: Number($json.draft_id) } : {})) }}"
       },
       "id": "d2429ef0-ab62-5fb6-af60-a0636e49b0b7",
       "name": "Record decision (Django)",
@@ -225,8 +235,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1100,
-        160
+        1320,
+        220
       ]
     },
     {
@@ -509,7 +519,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2420,
+        2640,
         120
       ],
       "retryOnFail": true,
@@ -521,6 +531,100 @@
           "name": "Gmail ops inbox"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "96216d44-a957-59c1-b940-2da4d96512bb",
+              "leftValue": "={{ $json.stale_draft === true || ['approved', 'done', 'rejected', 'ignored'].includes($json.current) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e8e658c0-0f97-548e-8cbe-7a2a6b7616e7",
+      "name": "Decided elsewhere?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Django did not record the decision: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+      },
+      "id": "7a52fd22-757f-5d00-b9b5-07c85b0b9b40",
+      "name": "Decision not recorded",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "804cedff-4eb0-5e01-be94-09205edb280a",
+              "leftValue": "={{ $json.status === 'done' || $json.current === 'done' }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "474e6ce6-dc6a-5d0c-a168-642af69e391d",
+      "name": "Marked done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2420,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Reply sent, but the email was not marked done: ' + (typeof $json.detail === 'string' ? $json.detail : JSON.stringify($json.detail || $json)).slice(0, 500) }}"
+      },
+      "id": "b5e8bf5b-45d4-5e4b-aaa7-3a6b88cff27f",
+      "name": "Mark done failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        300
+      ]
     }
   ],
   "connections": {
@@ -590,7 +694,7 @@
         ],
         [
           {
-            "node": "Already decided otherwise",
+            "node": "Decided elsewhere?",
             "type": "main",
             "index": 0
           }
@@ -670,7 +774,7 @@
       "main": [
         [
           {
-            "node": "Label ai-processed",
+            "node": "Marked done?",
             "type": "main",
             "index": 0
           }
@@ -682,6 +786,42 @@
         [
           {
             "node": "Mark done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decided elsewhere?": {
+      "main": [
+        [
+          {
+            "node": "Already decided otherwise",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decision not recorded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marked done?": {
+      "main": [
+        [
+          {
+            "node": "Label ai-processed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark done failed",
             "type": "main",
             "index": 0
           }

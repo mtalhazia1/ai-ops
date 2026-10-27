@@ -16,6 +16,11 @@ done
 # Without this key the n8n dump's credentials can't be decrypted.
 grep '^N8N_ENCRYPTION_KEY=' .env > "$dir/n8n-encryption-key.env"
 chmod 600 "$dir"/*
-ls -1dt "$root"/*/ | tail -n +15 | xargs -r rm -rf
+# Keep the newest 14. Only dirs named like $stamp are touched; those names sort by age,
+# and a glob expands sorted with no word splitting, so spaces in $root are safe.
+backups=("$root"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z/)
+if (( ${#backups[@]} > 14 )); then
+  rm -rf -- "${backups[@]:0:${#backups[@]}-14}"
+fi
 echo "Backup written to $dir:"
 ls -lh "$dir"

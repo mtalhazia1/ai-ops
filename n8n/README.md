@@ -120,7 +120,18 @@ WF1 / Retry webhook ─► Email ID ─► Triage (Django) ─► Needs review? 
   LLM's extracted fields only go into the deal name and note text.
 - **Retries**: every external HTTP node retries twice with a 5 s wait. Slack replies `200 {ok:false}` on
   errors, so an IF checks `ok` and a *Stop and Error* node fails the run (WF4 then records it and frees the
-  claims). ShipMatch uploads never throw: the status code is logged (`ok=false` for 400/402).
+  claims). ShipMatch uploads never throw: 200/201 and the refusals 400/402 are logged (`ok=false` for
+  400/402); any other answer (429, 5xx) stops the run at *ShipMatch upload failed*, so Retry repeats it.
+- **Django answers are checked, not trusted**: the few internal calls that must read a refusal
+  (`/triage`, `/draft`, `/status` for paperwork and the approval timeout) don't throw on 4xx/5xx, so an IF
+  accepts only the answers it knows (a triage result, ok draft, blocked draft, `pending`, or a 409 saying the
+  email is already where it should be) and anything else — a 5xx, an unexpected 409, an HTML error page —
+  goes to a *Stop and Error* node, so WF4 records it and Retry works. Their retry-on-fail only covers
+  connection errors; a 5xx from Django is a bug or a database problem, which Retry handles.
+- **Late reruns end quietly**: a WF2 run for an email WF2 is already done with (a duplicate or queued run,
+  a manual re-run) ends at *Already processed* when `/triage` answers 409 with `awaiting_approval`,
+  `approved`, `done`, `rejected` or `ignored`, and at *Left to the reviewer* when `/draft` answers 409 with
+  `needs_review` (e.g. after the approval timeout). A 409 naming `failed` is an error: use Retry.
 - **Retry webhook**: `POST /webhook/process` with header `x-webhook-secret: $N8N_WEBHOOK_SECRET` and body
   `{"email_id": 123}`. The dashboard's Retry button (M5) will call it after `failed → received`.
 - ShipMatch off (`SHIPMATCH_ENABLED=false` in `.env`): status emails skip the lookup; paperwork emails go to
@@ -128,11 +139,16 @@ WF1 / Retry webhook ─► Email ID ─► Triage (Django) ─► Needs review? 
 - **Drafting**: Django drafts from the structured triage data plus the playbook (never the raw email), runs
   the output checks (no new addresses or links, no money amounts, length) and moves the email to
   `awaiting_approval`, or to `needs_review` if the draft is blocked. A repeated call returns the saved draft.
-- **Approval**: one card per email in `#ops-approvals` showing category, sender, fields, what was already
+  An Anthropic outage (connection error, timeout, 429/5xx) is not a blocked draft: `/triage` or `/draft`
+  answers 503 `retry`, WF2 stops with an error and Retry repeats it (see "Running offline with mocks").
+- **Approval**: one card per draft (claim `slack_alert:<id>:approval:<draft_id>`, so overlapping runs share
+  it and a Retry that drafts again posts a new one) in `#ops-approvals` showing category, sender, fields, what was already
   done and the draft, with **Approve and send**, **Reject** and **Edit in dashboard** buttons. The first two
   are signed links to the Wait node's resume URL; the Wait node ignores bots (link previewers can't approve)
   and n8n refuses a second click (409). With no decision before `APPROVAL_TIMEOUT_MINUTES`, the email goes
   back to review. Slack links don't identify who clicked, so Slack decisions are recorded as reviewer `slack`.
+  **Approve and send** passes the card's `draft_id` to WF3; if the draft was re-done in the dashboard since,
+  Django refuses (409 `stale_draft`), sends nothing and moves the email to review.
 
 ## WF3 Execute
 
@@ -142,8 +158,11 @@ Started by WF2 (Slack decision) or by `POST /webhook/execute` (dashboard, header
 1. **Record decision**: `POST /internal/emails/{id}/approval`. Django checks the state, saves the `Approval`,
    moves the email to `approved`/`rejected` and returns the reply as a raw RFC 5322 message. The recipient
    (Reply-To or From) and the `In-Reply-To`/`References` headers come from the stored Gmail metadata. The same
-   decision repeated returns the saved one, so a retried WF3 can finish; a different one is refused (409),
-   and WF3 stops quietly.
+   decision repeated returns the saved one, so a retried WF3 can finish. WF3 stops quietly only when the
+   email was already decided otherwise (409 naming `approved`, `done`, `rejected` or `ignored`) or the Slack
+   approval was for an older draft (409 `stale_draft`, see WF2 *Approval*); any other
+   answer (422, other 409s, 5xx, an HTML error page) stops with an error so WF4 records it.
+   *Mark done* likewise accepts only `done` (or "already done" on a rerun).
 2. **Rejected**: label `ai-rejected`, remove `ai-processing`.
 3. **Approved**: claim `reply_sent:{id}` → Gmail `messages.send` with `threadId` (no automatic retry on
    this node; the claim makes a manual retry safe) → log → status `done` → label `ai-processed`.
@@ -159,9 +178,12 @@ a *Stop and Error* node, a trigger failure):
 
 1. **Failure details** (Code): workflow, node, error message, execution ID and URL from the Error Trigger.
 2. **Record failure** → `POST /internal/failures`. n8n's error payload doesn't say which email failed, so
-   every internal call from WF1–WF3 sends the header `X-N8N-Execution-Id`, and Django remembers the last
-   execution per email. Django finds the email, saves a `Failure`, moves the email to `failed`, frees the
-   claims the run held, and returns the alert text.
+   every internal call from WF1–WF3 sends the header `X-N8N-Execution-Id`, and Django remembers every
+   execution that called it for an email (`EmailExecution`). So a resumed approval run (a Wait node keeps
+   its execution id) that fails before calling Django again is still tied to its email after another run
+   touched it; an execution that touched several emails (a WF1 batch) is not attached to any. Django finds
+   the email, saves a `Failure`, moves the email to `failed`, frees the claims the run held, and returns
+   the alert text.
 3. **Slack `#ops-alerts`**: "⚠️ WF2 Process failed at HubSpot upsert contact: …" with links to the email
    in the dashboard and to the execution in n8n. If Django itself is down, a plain alert is still posted.
 
@@ -195,5 +217,74 @@ python dev/e2e_wf2.py quote --approve     # clicks the Slack card's Approve butt
 For a quick timeout test set `APPROVAL_TIMEOUT_MINUTES=1` in `.env`. To test WF4 and Retry, import the
 credentials with the HubSpot token changed to `pat-bad` (the mock answers 401), send a quote email, then
 re-import the good credentials and press Retry in the dashboard.
+
+### Failure controls
+
+The mocks behave normally unless told otherwise (`GET /_state` shows what they received, `POST /_reset`
+clears it and the rules below):
+
+- **Filename markers** (permanent, like ShipMatch's own refusals): an upload whose filename contains
+  `refuse400` gets 400 (file rejected), `paused402` gets 402 (uploads paused).
+- **`POST /_control`** adds or clears rules that make matching requests fail or wait:
+
+  ```json
+  {"add": [{"target": "upload", "match": "B_flaky.pdf", "status": 503}]}
+  {"add": [{"target": "gmail_send", "status": 503, "times": 1}]}
+  {"add": [{"target": "anthropic", "kind": "draft", "match": "llm500", "status": 500}]}
+  {"add": [{"target": "anthropic", "kind": "draft", "match": "llmbad", "malformed": true}]}
+  {"add": [{"target": "upload", "match": "slow", "delay": 8}]}
+  {"clear": true}
+  ```
+
+  `target` is `upload`, `anthropic`, `gmail_send`, `gmail_attachment`, `slack`, `hubspot` or
+  `shipmatch_search`; `match` is a substring of the request (the multipart body for uploads, the prompt for
+  Anthropic, the decoded message for `gmail_send`); `kind` picks the Anthropic call (`classify`, `extract`,
+  `draft`); `times` limits how many requests fail; a rule without `status` only waits `delay` seconds;
+  `malformed` answers 200 with a message that has no `usage` block. Rules that fired are listed in
+  `/_state` under `faults`. The mocks port isn't published; call it from inside the container, e.g.
+  `docker compose exec mocks python -c "import urllib.request as u; print(u.urlopen(u.Request('http://127.0.0.1:9000/_control', data=b'{\"clear\": true}')).read())"`.
+
+What Django does with the Anthropic failures: an outage — a connection error, timeout, 408, 429 or 5xx
+after the SDK's two retries — saves nothing and makes `/triage` or `/draft` answer 503
+`{ok:false, retry:true, detail}`, so WF2 stops at *Triage failed* / *Draft failed*, WF4 records a Failure
+and Retry repeats the call (reusing the saved triage when only drafting failed). Any other API error, a
+refusal, or output that fails validation is a review item as before: a *blocked draft* ("drafting
+failed: …", review + Slack alert), or for triage a `review` route. An answer Django can't handle at all
+(the `malformed` rule) makes `/draft` return 500, which WF2 also turns into a failure.
+
+### Scenario script
+
+`dev/e2e_scenarios.py` runs the failure paths end to end and prints PASS/FAIL per scenario with what it
+checked (Django rows through `psql`, n8n executions from the n8n database, Slack/Gmail/ShipMatch calls from
+the mocks). It needs `SHIPMATCH_ENABLED=true` and `APPROVAL_TIMEOUT_MINUTES=1` in `.env`, and creates a
+dashboard superuser `e2e` (password `E2E_PASSWORD`, default `e2e-pass-123`) to press Retry, Re-draft,
+Approve and "Send again anyway".
+
+```bash
+python dev/e2e_scenarios.py            # all, about 10 minutes (the timeout scenario waits for it)
+python dev/e2e_scenarios.py --list     # happy, late_rerun, refusal, retry, draft_errors, approval_errors,
+                                       # stale, send_uncertain, race, timeout, resumed_failure,
+                                       # cleaning, naive_date, retry_n8n_down, purge, metrics
+python dev/e2e_scenarios.py refusal retry
+```
+
+| Scenario | What it shows |
+|---|---|
+| `happy` | Every category with three overlapping WF2 runs: one deal, note, task, upload set and alert each; Approve → one Gmail send; Reject → `ai-rejected` label |
+| `late_rerun` | A WF2 run on an email that is awaiting approval or already decided ends at *Already processed* |
+| `refusal` | 402 + 400 uploads → review with the filenames in the reason, no AI draft; a rerun gives the same answer and no second alert |
+| `retry` | A 503 upload fails the run (Failure, `#ops-alerts`, `failed`); dashboard Retry re-uploads only that file and calls `/draft` once, after the upload is logged |
+| `draft_errors` | Anthropic 500 while drafting / 529 while classifying → `/draft` / `/triage` 503, WF2 error, Failure, no review item; Retry finishes (reusing the triage after a drafting outage); malformed answer → `/draft` 500 → WF2 error, Failure; Retry reuses the triage |
+| `approval_errors` | `/approval` 422 (no sender address) → WF3 error, Failure; a Slack Approve after a dashboard Reject ends quietly; WF2 on a failed email is an error |
+| `stale` | Re-draft in the dashboard, then the old Slack Approve: nothing sent, review; dashboard Approve sends the new draft once |
+| `send_uncertain` | Gmail 503 after the claim: `failed` with "reply may already have been sent", Retry refused, *Send again anyway* sends once |
+| `race` | Two runs on one paperwork email with a slow refused upload: the second stops at *Another run drafts*, no "received" draft |
+| `timeout` | No click → review after the timeout; a dashboard decision meanwhile → *Already decided* |
+| `resumed_failure` | An overlapping run touches the email, then the card's resumed run fails at *Send reply (WF3)* before calling Django (bug A replayed in that execution's copy of WF2): the Failure is still attached to the email; Retry posts a new card, Approve sends once |
+| `cleaning` | A quote laid out as `From: Lahore` / `To: Karachi` / ... keeps its lane (extracted, not asked for in the draft); a real Outlook quoted reply is still cut at its header block |
+| `naive_date` | Date headers with `-0000`, no zone, or naive ISO are saved as UTC (intake 200) and run through to an approval card |
+| `retry_n8n_down` | Stops the `n8n` container: dashboard Retry says "n8n unreachable", the email stays `failed` with Retry offered; after `n8n` is started again Retry finishes it |
+| `purge` | Backdates four emails 100 days and runs `purge_old_bodies`: only the done and rejected ones are blanked; the old open email's Slack Approve sends its real draft; a draft blanked anyway is refused at `/approval` and nothing is sent |
+| `metrics` | `/internal/metrics?period=today` matches the database, including automatic vs reviewed (`needed_review_at`); WF5 *Run now* posts the same digest text |
 
 Never import the mock credentials into a real deployment.

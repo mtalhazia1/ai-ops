@@ -1,7 +1,7 @@
 import pytest
 
 from inbox import services
-from inbox.models import Email, Failure, Triage
+from inbox.models import Approval, Email, Failure, Triage
 
 from .test_m4_draft import THREADED, _awaiting, _triaged
 
@@ -93,6 +93,33 @@ def test_redraft_from_dashboard(admin_client, api, fake_llm):
     assert email.drafts.count() == 1 and email.status == "needs_review"  # still with the reviewer
 
 
+def _log_upload(api, email_id, att, ok, response):
+    api("post", f"/emails/{email_id}/actions", {"kind": "shipmatch_upload", "idempotency_key": f"shipmatch_upload:{email_id}:{att}",
+                                                 "ok": ok, "request": {"filename": f"{att}.pdf"}, "response": response})
+
+
+def test_redraft_from_dashboard_respects_refused_upload(admin_client, api, fake_llm):
+    """The dashboard Re-draft goes through the same upload guard as WF2's /draft."""
+    email_id = _awaiting(api, fake_llm)  # an ok "documents received"-style draft is waiting
+    _log_upload(api, email_id, "a1", False, {"status": 400, "detail": "corrupt"})
+    llm = fake_llm()
+    page = admin_client.post(f"/emails/{email_id}/redraft/", follow=True).content.decode()
+    assert "No AI draft: ShipMatch did not accept: a1.pdf: file rejected (corrupt)" in page
+    email = Email.objects.get(pk=email_id)
+    assert email.latest_draft.ok is False and email.latest_draft.body == "" and llm.calls == []
+    # approving without writing a reply is refused: the old draft can no longer be sent
+    assert api("post", f"/emails/{email_id}/approval", {"decision": "approved"}).status_code == 422
+
+
+def test_redraft_from_dashboard_waits_for_upload_in_flight(admin_client, api, fake_llm):
+    email_id = _awaiting(api, fake_llm)
+    api("post", f"/emails/{email_id}/actions/claim", {"kind": "shipmatch_upload", "idempotency_key": f"shipmatch_upload:{email_id}:a1"})
+    drafts = Email.objects.get(pk=email_id).drafts.count()
+    page = admin_client.post(f"/emails/{email_id}/redraft/", follow=True).content.decode()
+    assert "Not re-drafted: ShipMatch upload not finished" in page
+    assert Email.objects.get(pk=email_id).drafts.count() == drafts
+
+
 def test_detail_page_shows_workspace(admin_client, api, fake_llm):
     email_id = _awaiting(api, fake_llm)
     page = admin_client.get(f"/emails/{email_id}/").content.decode()
@@ -141,3 +168,53 @@ def test_failures_page_and_resolve(admin_client, api, fake_llm):
 def test_pages_need_login(client, db):
     for url in ["/", "/emails/", "/failures/", "/metrics/", "/playbook/", "/evals/"]:
         assert client.get(url).status_code == 302, url
+
+
+def test_slack_approval_is_tied_to_the_draft_it_showed(admin_client, api, fake_llm):
+    """Slack "Approve and send" carries the draft id from its card; after a dashboard
+    Re-draft that draft is stale, so nothing is sent and the email goes to review."""
+    email_id, _ = _triaged(api, fake_llm)
+    shown = api("post", f"/emails/{email_id}/draft").json()
+    assert shown["draft_id"] == Email.objects.get(pk=email_id).latest_draft.id
+    fake_llm(draft="Hi Sarah,\nA different reply.\nBest regards,\nOps Team")
+    admin_client.post(f"/emails/{email_id}/redraft/")
+    email = Email.objects.get(pk=email_id)
+    assert email.status == "awaiting_approval" and email.latest_draft.id != shown["draft_id"]
+
+    stale = api("post", f"/emails/{email_id}/approval",
+                {"decision": "approved", "reviewer": "slack", "channel": "slack", "draft_id": shown["draft_id"]})
+    assert stale.status_code == 409
+    body = stale.json()
+    assert body["stale_draft"] is True and body["current"] == "needs_review"
+    assert body["approved_draft_id"] == shown["draft_id"] and body["latest_draft_id"] == email.latest_draft.id
+    email.refresh_from_db()
+    assert email.status == "needs_review" and "older draft" in email.needs_review_reason
+    assert not Approval.objects.filter(email_id=email_id).exists()
+    # a repeat (WF3 rerun) gives the same answer
+    again = api("post", f"/emails/{email_id}/approval", {"decision": "approved", "draft_id": shown["draft_id"]})
+    assert again.status_code == 409 and again.json()["stale_draft"] is True
+
+    # the dashboard (no draft_id, explicit final_body) still decides
+    ok = api("post", f"/emails/{email_id}/approval", {"decision": "approved", "channel": "dashboard",
+                                                       "reviewer": "admin", "final_body": email.latest_draft.body})
+    assert ok.status_code == 200 and ok.json()["decision"] == "approved"
+    assert "A different reply." in ok.json()["final_body"]
+
+
+def test_slack_approval_with_current_draft_is_sent(api, fake_llm):
+    email_id, _ = _triaged(api, fake_llm)
+    shown = api("post", f"/emails/{email_id}/draft").json()
+    body = api("post", f"/emails/{email_id}/approval",
+               {"decision": "approved", "reviewer": "slack", "draft_id": shown["draft_id"]}).json()
+    assert body["status"] == "approved" and body["final_body"] == shown["body"]
+    # WF3 rerun with the same draft id replays the decision
+    assert api("post", f"/emails/{email_id}/approval",
+               {"decision": "approved", "draft_id": shown["draft_id"]}).json()["rerun"] is True
+
+
+def test_slack_reject_of_older_draft_still_counts(admin_client, api, fake_llm):
+    email_id, _ = _triaged(api, fake_llm)
+    shown = api("post", f"/emails/{email_id}/draft").json()
+    admin_client.post(f"/emails/{email_id}/redraft/")
+    body = api("post", f"/emails/{email_id}/approval", {"decision": "rejected", "draft_id": shown["draft_id"]})
+    assert body.status_code == 200 and body.json()["status"] == "rejected"

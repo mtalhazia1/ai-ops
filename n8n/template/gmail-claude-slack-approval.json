@@ -110,7 +110,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Structured output guarantees schema-shaped JSON in the first text block.\nconst email = $('New email').item.json;\nconst block = ($json.content || []).find(b => b.type === 'text');\nconst r = JSON.parse(block ? block.text : '{}');\n// A simple keyword check as a second line of defence against prompt injection.\nconst injected = r.contains_instructions_to_ai ||\n  /ignore (all |the )?(previous|prior) instructions|^\\s*system\\s*:|you are now/im.test(email.text || '');\nreturn [{ json: { ...r, injected, message_id: email.id, from: email.from?.text || '', subject: email.subject || '' } }];",
+        "jsCode": "// Structured output guarantees schema-shaped JSON in the first text block.\nconst email = $('New email').item.json;\nconst block = ($json.content || []).find(b => b.type === 'text');\nconst r = JSON.parse(block ? block.text : '{}');\n// A simple keyword check as a second line of defence against prompt injection.\nconst injected = r.contains_instructions_to_ai ||\n  /ignore (all |the )?(previous|prior) instructions|^\\s*system\\s*:|you are now/im.test(email.text || '');\n// Runs once for each item, so it returns one item (an object), not an array.\nreturn { json: { ...r, injected, message_id: email.id, from: email.from?.text || '', subject: email.subject || '' } };",
         "mode": "runOnceForEachItem"
       },
       "id": "e1713f9a-a832-5b9b-83c2-68208318e1b3",
@@ -165,7 +165,7 @@
           "mode": "name",
           "value": "={{ $('Settings').item.json.slack_channel }}"
         },
-        "message": "=*{{ $json.category }}* · {{ $json.urgency }} urgency\\nFrom: {{ $json.from }}\\nSubject: {{ $json.subject }}\\n{{ $json.summary }}\\n\\n*Draft reply:*\\n{{ $json.reply }}",
+        "message": "=*{{ $json.category }}* · {{ $json.urgency }} urgency\nFrom: {{ $json.from }}\nSubject: {{ $json.subject }}\n{{ $json.summary }}\n\n*Draft reply:*\n{{ $json.reply }}",
         "approvalOptions": {
           "values": {
             "approvalType": "double",
@@ -206,7 +206,7 @@
           "mode": "name",
           "value": "={{ $('Settings').item.json.slack_channel }}"
         },
-        "text": "={{ $json.injected ? ':warning: Possible prompt injection, not answered' : ':inbox_tray: No reply drafted' }} · {{ $json.category }}\\nFrom: {{ $json.from }}\\nSubject: {{ $json.subject }}\\n{{ $json.summary }}",
+        "text": "={{ $json.injected ? ':warning: Possible prompt injection, not answered' : ':inbox_tray: No reply drafted' }} · {{ $json.category }}\nFrom: {{ $json.from }}\nSubject: {{ $json.subject }}\n{{ $json.summary }}",
         "otherOptions": {}
       },
       "id": "3eca1298-645b-5a4e-b104-42a96cf1d915",

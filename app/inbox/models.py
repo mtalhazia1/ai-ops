@@ -47,8 +47,11 @@ class Email(models.Model):
     category = models.CharField(max_length=32, choices=Category.choices, null=True, blank=True)
     urgency = models.CharField(max_length=16, choices=Urgency.choices, null=True, blank=True)
     needs_review_reason = models.TextField(null=True, blank=True)
-    # The n8n execution that last called the internal API for this email; lets the
-    # error workflow (WF4) tie a failed execution back to its email.
+    # When the email first entered needs_review (set by state.transition, never cleared).
+    # Metrics use it to count "a person had to step in", whichever path led to review.
+    needed_review_at = models.DateTimeField(null=True, blank=True)
+    # The n8n execution that last called the internal API for this email. Every execution
+    # that ever did is kept in EmailExecution, which WF4's /internal/failures searches.
     last_execution_id = models.CharField(max_length=100, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -66,6 +69,19 @@ class Email(models.Model):
     @property
     def latest_draft(self):
         return self.drafts.order_by("-created_at", "-id").first()
+
+
+class EmailExecution(models.Model):
+    """An n8n execution that called the internal API for this email (header
+    X-N8N-Execution-Id). Lets the error workflow (WF4) tie a failed execution back to its
+    email even after another run touched the email (a resumed approval run keeps its id)."""
+
+    email = models.ForeignKey(Email, on_delete=models.CASCADE, related_name="executions")
+    execution_id = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["execution_id", "email"], name="unique_execution_per_email")]
 
 
 class Triage(models.Model):

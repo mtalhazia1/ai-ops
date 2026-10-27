@@ -6,6 +6,8 @@
 - The result is validated with pydantic. On a validation error we retry once with
   the error message, then raise `LLMValidationError` so the caller routes to review.
 - Timeouts (30 s) and retries on 429/5xx/connection errors come from the SDK client.
+  When those retries run out, `LLMUnavailable` is raised: a temporary outage, which the
+  callers turn into a failed run (Retry) instead of a review item.
 - Every call returns token usage, cost and latency for the Triage / Draft rows.
 """
 
@@ -34,6 +36,23 @@ class LLMError(Exception):
 
 class LLMValidationError(LLMError):
     """The output did not validate, even after one retry."""
+
+
+class LLMUnavailable(LLMError):
+    """The API could not be reached, timed out or answered 408/429/5xx, after the SDK's own
+    retries. Nothing is wrong with the email: the caller should fail the run so that Retry
+    repeats the call later, not route the email to review."""
+
+
+def is_transient(exc: Exception) -> bool:
+    """True for errors a later retry can fix (connection, timeout, 408, 429, 5xx incl. 529)."""
+    import anthropic
+
+    if isinstance(exc, anthropic.APIConnectionError):  # APITimeoutError is a subclass
+        return True
+    if isinstance(exc, anthropic.APIStatusError):
+        return exc.status_code in (408, 429) or exc.status_code >= 500
+    return False
 
 
 @dataclass
@@ -111,7 +130,8 @@ class AnthropicLLM:
                 output_config=output_config,
             )
         except Exception as exc:  # anthropic.APIError and friends; already retried by the SDK
-            raise LLMError(f"{type(exc).__name__}: {exc}") from exc
+            error = LLMUnavailable if is_transient(exc) else LLMError
+            raise error(f"{type(exc).__name__}: {exc}") from exc
         latency_ms = int((time.monotonic() - started) * 1000)
         usage = Usage(
             input_tokens=response.usage.input_tokens,

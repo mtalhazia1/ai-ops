@@ -13,6 +13,7 @@ urlpatterns = [
     path("emails/<int:pk>/triage/", views.edit_triage, name="edit_triage"),
     path("emails/<int:pk>/redraft/", views.redraft, name="redraft"),
     path("emails/<int:pk>/retry/", views.retry_email, name="retry"),
+    path("emails/<int:pk>/reply/", views.resolve_reply, name="resolve_reply"),
     path("failures/", views.failures, name="failures"),
     path("failures/<int:pk>/resolve/", views.resolve_failure, name="resolve_failure"),
     path("metrics/", views.metrics_page, name="metrics"),

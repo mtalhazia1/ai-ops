@@ -2,8 +2,10 @@
 
 Deletes email bodies (and the drafted replies quoting them) older than
 EMAIL_BODY_RETENTION_DAYS (default 90), keeping every row, status, category, cost and
-action, so metrics and the audit trail stay intact (Section 12). Run it daily, e.g. from
-cron: docker compose exec -T app python manage.py purge_old_bodies
+action, so metrics and the audit trail stay intact (Section 12). Only emails in a final
+status (done, rejected, ignored) are purged: an open email (failed, in review, approved...)
+keeps its text, so a later Retry or approval never sends a purged reply.
+Run it daily, e.g. from cron: docker compose exec -T app python manage.py purge_old_bodies
 """
 
 from datetime import timedelta
@@ -12,9 +14,12 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from inbox.mail import PURGED
 from inbox.models import Approval, Draft, Email
+from inbox.state import TRANSITIONS
 
-PURGED = "[deleted after retention period]"
+# Statuses an email can never leave, so nothing will be sent for it any more.
+FINAL_STATUSES = sorted(status for status, targets in TRANSITIONS.items() if not targets)
 
 
 class Command(BaseCommand):
@@ -26,7 +31,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         cutoff = timezone.now() - timedelta(days=opts["days"])
-        emails = Email.objects.filter(received_at__lt=cutoff).exclude(body_text=PURGED)
+        emails = Email.objects.filter(received_at__lt=cutoff, status__in=FINAL_STATUSES).exclude(body_text=PURGED)
         count = emails.count()
         if not opts["dry_run"]:
             ids = list(emails.values_list("id", flat=True))
