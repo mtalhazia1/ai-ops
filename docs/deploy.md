@@ -64,6 +64,8 @@ Open each workflow, pick the credential in any node that shows a warning, and sa
 `ai-processing`, `ai-processed`, `ai-rejected`, `ai-skip`; put their IDs in `.env`; then
 `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` and publish **WF1** in the editor.
 
+Before go-live, run `docs/staging-checklist.md` on a staging server with test accounts.
+
 ## 5. Backups
 
 ```bash
